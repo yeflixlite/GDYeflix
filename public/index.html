@@ -636,7 +636,14 @@ function showPlayer(url, type) {
 
   if (type === 'm3u8') {
     if (Hls.isSupported()) {
-      hls = new Hls({ enableWorker: true, maxBufferLength: 30 });
+      hls = new Hls({ 
+        enableWorker: true, 
+        maxBufferLength: 60, // Aumentamos buffer a 60 seg
+        maxMaxBufferLength: 120, // Maximo 120 seg
+        startLevel: -1,
+        abrEwmaDefaultEstimate: 5000000, // Estimación inicial alta
+        testBandwidth: true
+      });
       hls.loadSource(url);
       hls.attachMedia(video);
       hls.on(Hls.Events.MANIFEST_PARSED, () => {

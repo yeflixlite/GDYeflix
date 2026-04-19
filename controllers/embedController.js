@@ -96,7 +96,9 @@ async function embedHandler(req, res, next) {
                 if (Hls.isSupported()) {
                     hlsObj = new Hls({ 
                         enableWorker: true,
-                        autoStartLoad: true
+                        autoStartLoad: true,
+                        maxBufferLength: 60, // 60 segundos de buffer
+                        maxMaxBufferLength: 120
                     });
                     hlsObj.loadSource(streamUrl);
                     hlsObj.attachMedia(video);
