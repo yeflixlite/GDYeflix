@@ -1,5 +1,5 @@
 {
-  "name": "video-proxy-server",
+  "name": "proxy-yeflix",
   "version": "1.0.0",
   "description": "Proxy backend 100% gratuito para reproducir videos externos evitando CORS",
   "main": "server.js",
