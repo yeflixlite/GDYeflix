@@ -2,6 +2,8 @@
  * ============================================================
  *  controllers/proxyController.js
  *  Sirve el contenido del video evitando CORS.
+ *  Incluye filtro inteligente para ignorar segmentos de publicidad
+ *  que causan bloqueos 403 y trabas.
  * ============================================================
  */
 
@@ -9,6 +11,18 @@
 
 const axios               = require('axios');
 const { getMediaHeaders } = require('../utils/browserHeaders');
+
+// Dominios conocidos de publicidad que suelen causar 403 en proxies
+const AD_BLOCKLIST = [
+    'tiktokcdn.com',
+    'doubleclick.net',
+    'adnxs.com',
+    'advertising.com',
+    'quantserve.com',
+    'scorecardresearch.com',
+    'clisky.xyz',
+    'trbt.it'
+];
 
 function resolveUrl(target, base) {
   if (target.startsWith('http')) return target;
@@ -29,6 +43,12 @@ function rewriteM3u8(content, originalUrl, proxyBase, referer) {
       line = line.trim();
       if (!line) return line;
       const abs = resolveUrl(line, originalUrl);
+
+      // FILTRO INTELIGENTE: Si es un anuncio conocido, no lo pasamos por el proxy.
+      // Lo dejamos original para que el navegador lo ignore si falla, sin trabar el video.
+      const isAd = AD_BLOCKLIST.some(domain => abs.includes(domain));
+      if (isAd) return abs; 
+
       return `${proxyBase}?url=${encodeURIComponent(abs)}&referer=${encodedReferer}`;
     }
   );
@@ -38,6 +58,9 @@ function rewriteM3u8(content, originalUrl, proxyBase, referer) {
     /URI=["']([^"']+)["']/g,
     (match, captured) => {
       const abs = resolveUrl(captured, originalUrl);
+      const isAd = AD_BLOCKLIST.some(domain => abs.includes(domain));
+      if (isAd) return `URI="${abs}"`;
+
       return `URI="${proxyBase}?url=${encodeURIComponent(abs)}&referer=${encodedReferer}&forceM3u8=1"`;
     }
   );
@@ -72,6 +95,11 @@ async function proxyHandler(req, res, next) {
       return res.status(400).json({ error: 'URL inválida.' });
     }
 
+    // Si por alguna razón recibimos una petición a un anuncio aquí, devolvemos 404 rápido
+    // para que el reproductor no se quede esperando.
+    const isAd = AD_BLOCKLIST.some(domain => decodedUrl.includes(domain));
+    if (isAd) return res.status(404).end();
+
     const decodedReferer = referer ? decodeURIComponent(referer) : '';
     const origin = (() => {
       try { return new URL(decodedUrl).origin; } catch { return ''; }
@@ -86,12 +114,12 @@ async function proxyHandler(req, res, next) {
       headers,
       responseType: 'stream',
       maxRedirects: 10,
-      timeout: 60_000,
-      validateStatus: () => true,
+      timeout: 10_000, // Timeout más corto para que no se trabe si algo falla
+      validateStatus: (status) => status < 400,
     });
 
     const contentType = upstream.headers['content-type'] || 'application/octet-stream';
-    const isM3u8 = detectIsM3u8(decodedUrl, contentType, forceM3u8 === '1');
+    const isM3u8 = detectIsM3u8(decodedUrl, contentType, forceFlag => forceM3u8 === '1');
 
     res.status(upstream.status);
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -105,7 +133,10 @@ async function proxyHandler(req, res, next) {
         if (upstream.headers[h]) res.setHeader(h, upstream.headers[h]);
       });
       upstream.data.pipe(res);
-      upstream.data.on('error', next);
+      upstream.data.on('error', (e) => {
+          console.error('[Proxy Pipe Error]', e.message);
+          res.end();
+      });
       return;
     }
 
@@ -113,14 +144,16 @@ async function proxyHandler(req, res, next) {
     let body = '';
     upstream.data.on('data',  chunk => { body += chunk.toString(); });
     upstream.data.on('end',   () => {
-      // USAMOS RUTA RELATIVA AL HOST
       const proxyBase = '/proxy';
       const rewrittenM3u8 = rewriteM3u8(body, decodedUrl, proxyBase, decodedReferer);
       res.end(rewrittenM3u8);
     });
 
   } catch (err) {
-    next(err);
+    // Si falla (ej: 403), devolvemos un 200 vacío o 404 rápido para no bloquear el player
+    if (!res.headersSent) {
+        res.status(404).end();
+    }
   }
 }
 
