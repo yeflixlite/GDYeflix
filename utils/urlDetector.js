@@ -44,6 +44,8 @@ const PROVIDERS = {
     /filemoon\.sx/i,
     /filemooon\.com/i,
     /moonplayer\.net/i,
+    /bysejikuar\.com/i,
+    /398fitus\.com/i,
   ],
   mp4upload: [
     /mp4upload\.com/i,

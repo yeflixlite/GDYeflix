@@ -1,23 +1,22 @@
 /**
  * ============================================================
  *  controllers/embedController.js
- *  Servidor de reproductor minimalista (Embed)
+ *  Servidor de reproductor minimalista (Embed) para compartir.
+ *  Diseño Premium · Soporte Auto-Extraíble
  * ============================================================
  */
 
 'use strict';
 
-const { detectProvider } = require('../utils/urlDetector');
-
 /**
- * Renderiza una página HTML simple con HLS.js configurado.
+ * Renderiza una página HTML optimizada para embeds (sin menús, solo video).
  */
 async function embedHandler(req, res, next) {
   try {
     const { url } = req.query;
 
     if (!url) {
-      return res.status(400).send('Error: Falta el parámetro ?url=');
+      return res.status(400).send('Error: Falta el parámetro ?url= en el embed.');
     }
 
     const html = `
@@ -25,151 +24,144 @@ async function embedHandler(req, res, next) {
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <title>VideoProxy Player · Embed</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Antigravity Player · Embed</title>
     <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;700&display=swap" rel="stylesheet">
     <style>
-        body, html { margin: 0; padding: 0; width: 100%; height: 100%; background: #000; overflow: hidden; display: flex; align-items: center; justify-content: center; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-        video { width: 100%; height: 100%; outline: none; }
-        #status { color: #8b85ff; font-size: 14px; position: absolute; z-index: 10000; background: rgba(0,0,0,0.8); padding: 12px 24px; border-radius: 99px; border: 1px solid rgba(255,255,255,0.1); }
-        
-        /* Controles flotantes - Ahora mas visibles y siempre arriba */
-        .controls { position: absolute; top: 15px; right: 15px; display: none; flex-direction: column; gap: 8px; z-index: 99999; pointer-events: none; }
-        .control-group { 
-            background: rgba(15,15,20,0.9); 
-            border: 1px solid #6c63ff; 
-            border-radius: 10px; 
-            padding: 8px 12px; 
-            display: flex; 
-            flex-direction: column; 
-            gap: 4px; 
-            backdrop-filter: blur(10px); 
-            pointer-events: auto;
-            box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+        body, html { 
+            margin: 0; padding: 0; width: 100%; height: 100%; 
+            background: #000; overflow: hidden; 
+            font-family: 'Outfit', sans-serif;
         }
-        .control-group label { font-size: 10px; color: #6c63ff; text-transform: uppercase; font-weight: 800; letter-spacing: 1px; }
-        .control-group select { background: transparent; color: #fff; border: none; font-size: 13px; outline: none; cursor: pointer; padding: 2px 0; width: 120px; }
-        .control-group select option { background: #1a1a20; color: #fff; }
+        #container { position: relative; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
+        video { width: 100%; height: 100%; outline: none; background: #000; }
         
-        .toast { position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%); background: #6c63ff; color: white; padding: 10px 20px; border-radius: 99px; font-size: 13px; font-weight: 600; opacity: 0; transition: opacity 0.3s; pointer-events: none; z-index: 100000; box-shadow: 0 4px 15px rgba(108, 99, 255, 0.4); }
+        /* Overlay de carga */
+        #loader {
+            position: absolute; inset: 0; z-index: 100;
+            background: #05060a; display: flex; flex-direction: column;
+            align-items: center; justify-content: center; color: #fff;
+            transition: opacity 0.5s;
+        }
+        .spinner {
+            width: 40px; height: 40px; border: 3px solid rgba(255,255,255,0.1);
+            border-top: 3px solid #6366f1; border-radius: 50%;
+            animation: spin 0.8s linear infinite; margin-bottom: 15px;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        
+        /* Menú de calidad flotante */
+        #menu {
+            position: absolute; top: 15px; right: 15px; z-index: 1000;
+            background: rgba(13, 15, 23, 0.85); backdrop-filter: blur(10px);
+            border: 1px solid rgba(255,255,255,0.1); border-radius: 10px;
+            padding: 8px; display: none; flex-direction: column; gap: 5px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+        }
+        select { 
+            background: #1a1d2d; color: #fff; border: none; 
+            border-radius: 5px; padding: 5px 10px; font-size: 12px; 
+            cursor: pointer; outline: none; font-family: inherit;
+        }
+        .error-msg { color: #ef4444; font-size: 14px; text-align: center; padding: 20px; display: none; }
     </style>
 </head>
 <body>
-    <div id="status">⏳ Extrayendo video seguro...</div>
-    <div id="toast" class="toast">Cambiando...</div>
-    
-    <div class="controls" id="playerControls">
-        <div class="control-group">
-            <label>Resolución</label>
+    <div id="container">
+        <div id="loader">
+            <div class="spinner"></div>
+            <div style="font-size: 13px; font-weight: 400; color: #94a3b8;">Sincronizando stream seguro...</div>
+        </div>
+        
+        <div id="menu">
             <select id="qualitySelect"><option>Cargando...</option></select>
+            <select id="audioSelect" style="display:none"></select>
         </div>
-        <div class="control-group" id="audioGroup">
-            <label>Idioma / Audio</label>
-            <select id="audioSelect"><option>Cargando...</option></select>
-        </div>
+
+        <div id="error" class="error-msg"></div>
+        <video id="player" controls playsinline crossorigin="anonymous"></video>
     </div>
 
-    <video id="player" controls playsinline crossorigin="anonymous"></video>
-
     <script>
-        let hlsObj = null;
+        let hls = null;
+        const video = document.getElementById('player');
+        const loader = document.getElementById('loader');
+        const errorView = document.getElementById('error');
 
-        function showToast(msg) {
-            const t = document.getElementById('toast');
-            t.textContent = msg;
-            t.style.opacity = '1';
-            setTimeout(() => t.style.opacity = '0', 2000);
-        }
-
-        async function start() {
-            const status = document.getElementById('status');
-            const video = document.getElementById('player');
+        async function init() {
             const originalUrl = "${encodeURIComponent(url)}";
             
             try {
-                const res = await fetch('/extract?url=' + originalUrl);
+                // Usamos el endpoint /play que ahora es robusto
+                const res = await fetch('/play?url=' + originalUrl);
                 const data = await res.json();
-                if (!data.ok) throw new Error(data.error);
                 
-                status.style.display = 'none';
-                const streamUrl = data.proxyUrl;
-
-                if (Hls.isSupported()) {
-                    hlsObj = new Hls({ 
-                        enableWorker: true,
-                        autoStartLoad: true,
-                        maxBufferLength: 60, // 60 segundos de buffer
-                        maxMaxBufferLength: 120
-                    });
-                    hlsObj.loadSource(streamUrl);
-                    hlsObj.attachMedia(video);
-                    
-                    hlsObj.on(Hls.Events.MANIFEST_PARSED, () => {
-                        setupUI();
-                        video.play().catch(() => {});
-                    });
-                    
-                    // Actualizar cuando cambie el nivel o track para refrescar UI
-                    hlsObj.on(Hls.Events.LEVEL_SWITCHED, setupUI);
-                    hlsObj.on(Hls.Events.AUDIO_TRACK_SWITCHED, setupUI);
-
-                } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-                    video.src = streamUrl;
-                    video.play().catch(() => {});
-                }
+                if (data.error) throw new Error(data.error);
+                
+                startStreaming(data.proxyUrl, data.type);
             } catch (err) {
-                status.style.background = '#f43f5e';
-                status.style.color = 'white';
-                status.textContent = '❌ Error: ' + err.message;
+                loader.style.display = 'none';
+                errorView.style.display = 'block';
+                errorView.textContent = "Error: " + err.message;
             }
+        }
+
+        function startStreaming(url, type) {
+            loader.style.opacity = '0';
+            setTimeout(() => loader.style.display = 'none', 500);
+
+            if (type === 'm3u8' && Hls.isSupported()) {
+                hls = new Hls({ 
+                    enableWorker: true,
+                    maxBufferLength: 60,
+                    maxMaxBufferLength: 120,
+                    maxBufferSize: 60 * 1024 * 1024,
+                    nudgeOffset: 0.1,
+                    nudgeMaxRetries: 5
+                });
+                hls.loadSource(url);
+                hls.attachMedia(video);
+                hls.on(Hls.Events.MANIFEST_PARSED, setupUI);
+            } else {
+                video.src = url;
+            }
+            video.play().catch(() => {});
         }
 
         function setupUI() {
-            if (!hlsObj) return;
+            const menu = document.getElementById('menu');
             const q = document.getElementById('qualitySelect');
             const a = document.getElementById('audioSelect');
-            const ctrl = document.getElementById('playerControls');
-            const aGroup = document.getElementById('audioGroup');
 
-            // Siempre mostramos el contenedor si es HLS
-            ctrl.style.display = 'flex';
+            if (!hls) return;
 
-            // ── Configurar Calidad ──
-            const currentLevel = hlsObj.currentLevel;
-            q.innerHTML = '<option value="-1"' + (currentLevel === -1 ? ' selected' : '') + '>Auto (Adaptativo)</option>';
-            hlsObj.levels.forEach((lv, i) => {
+            // Calidades
+            q.innerHTML = '<option value="-1">Calidad: Auto</option>';
+            hls.levels.forEach((l, i) => {
                 const opt = document.createElement('option');
                 opt.value = i;
-                opt.selected = (i === currentLevel);
-                opt.textContent = lv.height ? lv.height + "p" : "Calidad " + (i+1);
+                opt.textContent = l.height ? l.height + 'p' : 'Nivel ' + i;
                 q.appendChild(opt);
             });
-            q.onchange = () => {
-                hlsObj.currentLevel = parseInt(q.value);
-                showToast('Ajustando resolución...');
-            }
+            q.onchange = () => (hls.currentLevel = parseInt(q.value));
 
-            // ── Configurar Audio ──
-            if (hlsObj.audioTracks && hlsObj.audioTracks.length > 0) {
-                const currentTrack = hlsObj.audioTrack;
-                a.innerHTML = '';
-                hlsObj.audioTracks.forEach((t, i) => {
+            // Audios
+            if (hls.audioTracks.length > 1) {
+                a.style.display = 'block';
+                hls.audioTracks.forEach((t, i) => {
                     const opt = document.createElement('option');
                     opt.value = i;
-                    opt.selected = (i === currentTrack);
-                    opt.textContent = t.name || t.lang || "Audio " + (i+1);
+                    opt.textContent = t.name || t.lang || 'Audio ' + i;
                     a.appendChild(opt);
                 });
-                a.onchange = () => {
-                    hlsObj.audioTrack = parseInt(a.value);
-                    showToast('Cambiando idioma...');
-                }
-                aGroup.style.display = 'flex';
-            } else {
-                aGroup.style.display = 'none';
+                a.onchange = () => (hls.audioTrack = parseInt(a.value));
             }
+
+            menu.style.display = 'flex';
         }
 
-        start();
+        init();
     </script>
 </body>
 </html>
