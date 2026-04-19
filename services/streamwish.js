@@ -122,25 +122,28 @@ async function extract(url) {
 
   console.log(`[StreamWish/${host}] 🔍 Accediendo a: ${embedUrl}`);
 
-  /* ── Paso 1: Obtener la página embed ───────────────────── */
-  const pageRes = await fetchWithRetry(embedUrl, {
+  let response = await fetchWithRetry(embedUrl, {
     referer : 'https://www.google.com/',
     origin,
-    headers : {
-      'X-Requested-With' : 'XMLHttpRequest',
-      'Sec-Fetch-Dest'   : 'iframe',
-      'Sec-Fetch-Mode'   : 'navigate',
-      'Sec-Fetch-Site'   : 'cross-site',
-    },
   });
 
-  if (pageRes.status !== 200) {
-    throw new Error(`[StreamWish] HTTP ${pageRes.status} al acceder a ${embedUrl}`);
+  let html = response.data;
+
+  // DETECCIÓN DE LOADING SHELL (SPA):
+  // Si el HTML es muy corto o contiene "Page is loading", intentamos forzar la carga real.
+  if (html.length < 2000 && html.includes('Page is loading')) {
+    console.log(`[StreamWish/${host}] ⏳ Detectada shell de carga, intentando bypass...`);
+    // A veces basta con esperar un segundo y reintentar con las cookies que nos dio
+    const cookies = response.headers['set-cookie'];
+    response = await fetchWithRetry(embedUrl, {
+      referer: embedUrl,
+      origin,
+      headers: { 'Cookie': cookies ? cookies.join('; ') : '' }
+    });
+    html = response.data;
   }
 
-  const html    = typeof pageRes.data === 'string' ? pageRes.data : JSON.stringify(pageRes.data);
   const scripts = extractScripts(html);
-
   console.log(`[StreamWish/${host}] 📄 HTML obtenido (${html.length} bytes), analizando...`);
 
   /* ── Estrategia 1: jwplayer setup  ─────────────────────── */

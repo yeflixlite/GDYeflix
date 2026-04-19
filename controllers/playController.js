@@ -32,8 +32,6 @@ const HTTP_SERVICE_MAP = {
 };
 
 /** Proveedores que intentamos primero con Puppeteer por ser SPAs agresivos */
-const PUPPETEER_FIRST = new Set(['hgcloud']);
-
 /**
  * GET /play?url=<encoded-url>
  * Responde con JSON: { videoUrl, proxyUrl, type, provider }
@@ -54,15 +52,14 @@ async function playHandler(req, res, next) {
       return res.status(400).json({ error: 'La URL proporcionada no es válida.' });
     }
 
-    const provider     = detectProvider(decodedUrl);
-    const usePuppeteer = PUPPETEER_FIRST.has(provider);
+    const provider = detectProvider(decodedUrl);
 
     console.log(`\n[Play] Proveedor detectado: ${provider} → ${decodedUrl}`);
 
     let result = null;
     let method = null;
 
-    // Lógica de extracción con fallback robusto
+    // Lógica de extracción optimizada para VELOCIDAD
     if (mode === 'puppeteer') {
       result = await puppeteerExtractor.extract(decodedUrl);
       method = 'puppeteer';
@@ -71,25 +68,18 @@ async function playHandler(req, res, next) {
       result = await service.extract(decodedUrl);
       method = 'http';
     } else {
-      // Modo AUTO: Intenta HTTP, si falla va a Puppeteer
-      if (usePuppeteer) {
+      // MODO AUTO: Siempre intenta HTTP primero (1s) antes de ir a Puppeteer (15s)
+      try {
+        const service = HTTP_SERVICE_MAP[provider] || generic;
+        result = await service.extract(decodedUrl);
+        method = 'http';
+      } catch (err) {
+        console.warn(`[Play] HTTP falló para ${provider}, intentando Puppeteer como fallback...`);
         try {
           result = await puppeteerExtractor.extract(decodedUrl);
           method = 'puppeteer';
-        } catch {
-          const service = HTTP_SERVICE_MAP[provider] || generic;
-          result = await service.extract(decodedUrl);
-          method = 'http';
-        }
-      } else {
-        try {
-          const service = HTTP_SERVICE_MAP[provider] || generic;
-          result = await service.extract(decodedUrl);
-          method = 'http';
-        } catch (err) {
-          console.warn(`[Play] HTTP falló para ${provider}, intentando Puppeteer...`);
-          result = await puppeteerExtractor.extract(decodedUrl);
-          method = 'puppeteer';
+        } catch (puppErr) {
+          throw new Error(`Fallo total. HTTP: ${err.message}. Puppeteer: ${puppErr.message}`);
         }
       }
     }

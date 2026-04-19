@@ -28,8 +28,6 @@ const HTTP_SERVICE_MAP = {
   unknown    : generic,
 };
 
-const PUPPETEER_FIRST = new Set(['hgcloud']);
-
 async function extractHandler(req, res, next) {
   try {
     const { url, mode = 'auto' } = req.query;
@@ -46,8 +44,7 @@ async function extractHandler(req, res, next) {
       return res.status(400).json({ ok: false, error: 'La URL proporcionada no es válida.' });
     }
 
-    const provider     = detectProvider(decodedUrl);
-    const usePuppeteer = PUPPETEER_FIRST.has(provider);
+    const provider = detectProvider(decodedUrl);
 
     let result  = null;
     let method  = null;
