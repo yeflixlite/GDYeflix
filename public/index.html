@@ -1,0 +1,784 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>VideoProxy Player · Reproductor Universal</title>
+  <meta name="description" content="Reproductor de video universal que obtiene enlaces dinámicamente evitando restricciones CORS." />
+
+  <!-- HLS.js -->
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@latest/dist/hls.min.js"></script>
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+
+  <style>
+    /* ═══════════════════════════════════════════════════════
+       DESIGN SYSTEM
+    ═══════════════════════════════════════════════════════ */
+    :root {
+      --bg-base:      #0a0b0f;
+      --bg-surface:   #12141c;
+      --bg-card:      #1a1d28;
+      --bg-input:     #1e2130;
+      --accent:       #6c63ff;
+      --accent-light: #8b85ff;
+      --accent-glow:  rgba(108, 99, 255, 0.35);
+      --green:        #22d3a5;
+      --red:          #f43f5e;
+      --yellow:       #fbbf24;
+      --text-primary: #f0f0f8;
+      --text-secondary:#9ca3b0;
+      --text-muted:   #5a6070;
+      --border:       rgba(255,255,255,0.07);
+      --border-focus: rgba(108,99,255,0.6);
+      --radius-sm:    8px;
+      --radius-md:    14px;
+      --radius-lg:    20px;
+      --shadow-glow:  0 0 40px var(--accent-glow);
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background: var(--bg-base);
+      color: var(--text-primary);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    body::before {
+      content: '';
+      position: fixed; inset: 0;
+      background:
+        radial-gradient(ellipse 80% 50% at 20% 10%, rgba(108,99,255,0.12) 0%, transparent 60%),
+        radial-gradient(ellipse 60% 40% at 80% 90%, rgba(34,211,165,0.07) 0%, transparent 55%);
+      pointer-events: none; z-index: 0;
+    }
+
+    /* ── Header ──────────────────────────────────────────── */
+    header {
+      position: relative; z-index: 1;
+      width: 100%; padding: 22px 40px;
+      display: flex; align-items: center; gap: 14px;
+      border-bottom: 1px solid var(--border);
+      backdrop-filter: blur(12px);
+      background: rgba(10, 11, 15, 0.7);
+    }
+    .logo-icon {
+      width: 42px; height: 42px;
+      background: linear-gradient(135deg, var(--accent), var(--green));
+      border-radius: 12px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 20px; box-shadow: 0 0 20px var(--accent-glow); flex-shrink: 0;
+    }
+    .logo-text { display: flex; flex-direction: column; }
+    .logo-text h1 {
+      font-size: 1.25rem; font-weight: 700; letter-spacing: -0.3px;
+      background: linear-gradient(135deg, #fff 60%, var(--accent-light));
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    }
+    .logo-text span { font-size: 0.72rem; color: var(--text-muted); }
+    .badge {
+      margin-left: auto;
+      background: rgba(34,211,165,0.12); border: 1px solid rgba(34,211,165,0.25);
+      color: var(--green); font-size: 0.72rem; font-weight: 600;
+      padding: 4px 12px; border-radius: 999px; letter-spacing: 0.5px;
+    }
+
+    /* ── Main ────────────────────────────────────────────── */
+    main {
+      position: relative; z-index: 1;
+      width: 100%; max-width: 980px;
+      padding: 36px 24px 60px;
+      display: flex; flex-direction: column; gap: 24px;
+    }
+
+    /* ── Tabs de modo ────────────────────────────────────── */
+    .tabs {
+      display: flex; gap: 4px;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      padding: 5px;
+    }
+    .tab-btn {
+      flex: 1; padding: 10px 16px;
+      border: none; border-radius: 10px;
+      font-family: 'Inter', sans-serif; font-size: 0.85rem; font-weight: 500;
+      cursor: pointer; transition: background 0.2s, color 0.2s;
+      background: transparent; color: var(--text-muted);
+    }
+    .tab-btn.active {
+      background: linear-gradient(135deg, var(--accent), #8b5cf6);
+      color: #fff;
+    }
+
+    /* ── Input card ──────────────────────────────────────── */
+    .input-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 26px;
+      display: flex; flex-direction: column; gap: 16px;
+    }
+    .input-card label {
+      font-size: 0.78rem; font-weight: 600; color: var(--text-muted);
+      text-transform: uppercase; letter-spacing: 1px;
+    }
+    .input-row { display: flex; gap: 12px; }
+    .url-input {
+      flex: 1; background: var(--bg-input);
+      border: 1px solid var(--border); border-radius: var(--radius-md);
+      padding: 14px 18px; color: var(--text-primary);
+      font-family: 'Inter', sans-serif; font-size: 0.95rem; outline: none;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+    .url-input:focus { border-color: var(--border-focus); box-shadow: 0 0 0 3px rgba(108,99,255,0.15); }
+    .url-input::placeholder { color: var(--text-muted); }
+    .play-btn {
+      padding: 14px 26px; border-radius: var(--radius-md); border: none;
+      cursor: pointer; font-family: 'Inter', sans-serif; font-size: 0.95rem; font-weight: 600;
+      background: linear-gradient(135deg, var(--accent), #8b5cf6); color: #fff;
+      box-shadow: 0 4px 20px var(--accent-glow);
+      transition: transform 0.15s, box-shadow 0.15s, opacity 0.15s;
+      white-space: nowrap; display: flex; align-items: center; gap: 8px;
+    }
+    .play-btn:hover  { transform: translateY(-1px); box-shadow: 0 6px 28px var(--accent-glow); }
+    .play-btn:active { transform: translateY(0); }
+    .play-btn:disabled { opacity: 0.55; cursor: not-allowed; transform: none; }
+
+    .quick-examples { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    .quick-examples span { font-size: 0.75rem; color: var(--text-muted); }
+    .example-chip {
+      font-size: 0.72rem; padding: 4px 12px;
+      border-radius: 6px; border: 1px solid var(--border);
+      background: var(--bg-input); color: var(--text-secondary);
+      cursor: pointer; transition: border-color 0.15s, color 0.15s;
+    }
+    .example-chip:hover { border-color: var(--accent); color: var(--accent-light); }
+    .example-chip.highlight {
+      border-color: rgba(34,211,165,0.4); color: var(--green);
+      background: rgba(34,211,165,0.07);
+    }
+    .example-chip.highlight:hover { border-color: var(--green); }
+
+    /* ── Callout informativo ─────────────────────────────── */
+    .callout {
+      display: flex; gap: 12px; align-items: flex-start;
+      background: rgba(108,99,255,0.07); border: 1px solid rgba(108,99,255,0.2);
+      border-radius: var(--radius-md); padding: 14px 16px;
+      font-size: 0.82rem; color: var(--text-secondary); line-height: 1.5;
+    }
+    .callout-icon { font-size: 1rem; flex-shrink: 0; padding-top: 1px; }
+    .callout code {
+      background: rgba(108,99,255,0.15); padding: 1px 6px; border-radius: 4px;
+      font-family: 'Courier New', monospace; font-size: 0.8rem; color: var(--accent-light);
+    }
+
+    /* ── Status bar ──────────────────────────────────────── */
+    .status-bar {
+      display: flex; align-items: center; gap: 10px;
+      background: var(--bg-card); border: 1px solid var(--border);
+      border-radius: var(--radius-md); padding: 14px 20px;
+      font-size: 0.85rem; color: var(--text-secondary); min-height: 52px;
+      transition: border-color 0.3s;
+    }
+    .status-bar.loading { border-color: rgba(108,99,255,0.5); }
+    .status-bar.success { border-color: rgba(34,211,165,0.5); }
+    .status-bar.error   { border-color: rgba(244,63,94,0.5); }
+    .status-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: var(--text-muted); flex-shrink: 0; transition: background 0.3s;
+    }
+    .status-bar.idle    .status-dot { background: var(--text-muted); }
+    .status-bar.loading .status-dot { background: var(--accent); animation: pulse 1s infinite; }
+    .status-bar.success .status-dot { background: var(--green); }
+    .status-bar.error   .status-dot { background: var(--red); }
+    @keyframes pulse {
+      0%, 100% { transform: scale(1); opacity: 1; }
+      50%       { transform: scale(1.4); opacity: 0.6; }
+    }
+    .status-provider {
+      margin-left: auto; font-size: 0.72rem; font-weight: 600; text-transform: uppercase;
+      letter-spacing: 0.5px; padding: 3px 10px; border-radius: 999px;
+      background: rgba(108,99,255,0.12); color: var(--accent-light);
+      opacity: 0; transition: opacity 0.3s;
+    }
+    .status-provider.visible { opacity: 1; }
+
+    /* ── Log card ────────────────────────────────────────── */
+    .log-card {
+      background: var(--bg-card); border: 1px solid var(--border);
+      border-radius: var(--radius-md); padding: 0; overflow: hidden;
+      display: none;
+    }
+    .log-header {
+      padding: 10px 16px; border-bottom: 1px solid var(--border);
+      font-size: 0.72rem; font-weight: 600; color: var(--text-muted);
+      text-transform: uppercase; letter-spacing: 0.8px;
+      display: flex; justify-content: space-between; align-items: center;
+    }
+    .log-clear {
+      cursor: pointer; color: var(--text-muted); font-size: 0.7rem;
+      padding: 2px 8px; border-radius: 4px; border: 1px solid var(--border);
+      background: none; font-family: inherit;
+    }
+    .log-clear:hover { color: var(--red); border-color: rgba(244,63,94,0.4); }
+    .log-body {
+      padding: 12px 16px; font-family: 'Courier New', monospace;
+      font-size: 0.78rem; color: var(--text-secondary);
+      max-height: 180px; overflow-y: auto; line-height: 1.7;
+    }
+    .log-line.ok   { color: var(--green); }
+    .log-line.warn { color: var(--yellow); }
+    .log-line.err  { color: var(--red); }
+
+    /* ── Video container ─────────────────────────────────── */
+    .video-wrapper {
+      background: #000; border-radius: var(--radius-lg); overflow: hidden;
+      border: 1px solid var(--border); position: relative;
+      aspect-ratio: 16/9; display: flex; align-items: center; justify-content: center;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.5), var(--shadow-glow);
+    }
+    .video-placeholder {
+      display: flex; flex-direction: column; align-items: center; gap: 16px;
+      color: var(--text-muted); padding: 40px;
+    }
+    .video-placeholder .play-icon {
+      width: 72px; height: 72px; border-radius: 50%;
+      background: rgba(108,99,255,0.12); border: 1px solid rgba(108,99,255,0.25);
+      display: flex; align-items: center; justify-content: center; font-size: 28px;
+    }
+    .video-placeholder p { font-size: 0.88rem; text-align: center; max-width: 320px; }
+    #videoPlayer { width: 100%; height: 100%; display: none; background: #000; }
+
+    /* ── Info grid ───────────────────────────────────────── */
+    .info-grid {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px;
+    }
+    .info-card {
+      background: var(--bg-card); border: 1px solid var(--border);
+      border-radius: var(--radius-md); padding: 18px 20px;
+      display: flex; flex-direction: column; gap: 6px;
+    }
+    .info-card .label {
+      font-size: 0.7rem; font-weight: 600; color: var(--text-muted);
+      text-transform: uppercase; letter-spacing: 0.8px;
+    }
+    .info-card .value { font-size: 0.9rem; font-weight: 500; color: var(--text-primary); word-break: break-all; }
+    .info-card .value.url-value {
+      font-size: 0.78rem; color: var(--accent-light);
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer;
+    }
+    .tag { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 0.72rem; font-weight: 600; text-transform: uppercase; }
+    .tag.m3u8 { background: rgba(34,211,165,0.12); color: var(--green); }
+    .tag.mp4  { background: rgba(108,99,255,0.12); color: var(--accent-light); }
+    .tag.txt  { background: rgba(251,191,36,0.12); color: var(--yellow); }
+
+    /* ── Footer ──────────────────────────────────────────── */
+    footer {
+      position: relative; z-index: 1;
+      width: 100%; padding: 20px 40px;
+      border-top: 1px solid var(--border);
+      text-align: center; color: var(--text-muted); font-size: 0.75rem;
+    }
+
+    /* ── Spinner ─────────────────────────────────────────── */
+    .spinner {
+      width: 18px; height: 18px;
+      border: 2px solid rgba(255,255,255,0.15);
+      border-top-color: #fff; border-radius: 50%;
+      animation: spin 0.7s linear infinite; display: none;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── Toasts ──────────────────────────────────────────── */
+    #toast-container {
+      position: fixed; bottom: 24px; right: 24px;
+      display: flex; flex-direction: column; gap: 8px; z-index: 9999;
+    }
+    .toast {
+      padding: 12px 18px; border-radius: 10px;
+      font-size: 0.85rem; font-weight: 500;
+      animation: slideIn 0.25s ease; max-width: 360px;
+    }
+    .toast.success { background: rgba(34,211,165,0.15); border: 1px solid rgba(34,211,165,0.3); color: var(--green); }
+    .toast.error   { background: rgba(244,63,94,0.15);  border: 1px solid rgba(244,63,94,0.3);  color: var(--red);  }
+    @keyframes slideIn { from { transform: translateX(40px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+
+    @media (max-width: 600px) {
+      .input-row { flex-direction: column; }
+      header     { padding: 16px 20px; }
+      main       { padding: 24px 16px 40px; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ── Header ─────────────────────────────────────────────── -->
+<header>
+  <div class="logo-icon">📡</div>
+  <div class="logo-text">
+    <h1>VideoProxy Player</h1>
+    <span>Backend Proxy · Node.js · 100% Gratuito</span>
+  </div>
+  <div class="badge">🟢 EN LÍNEA</div>
+</header>
+
+<!-- ── Main ───────────────────────────────────────────────── -->
+<main>
+
+  <!-- Tabs de modo -->
+  <div class="tabs" id="modeTabs">
+    <button class="tab-btn active" id="tabPlay"    onclick="switchMode('play')">▶ /play  – Universal</button>
+    <button class="tab-btn"        id="tabExtract" onclick="switchMode('extract')">🔍 /extract  – StreamWish / HGCloud</button>
+  </div>
+
+  <!-- Input card -->
+  <div class="input-card">
+    <label for="videoUrl" id="inputLabel">URL de video o página embed</label>
+
+    <!-- Callout que aparece en modo extract -->
+    <div class="callout" id="extractCallout" style="display:none">
+      <span class="callout-icon">💡</span>
+      <div>
+        Modo <strong>Extract</strong> — usa <code>/extract</code> con estrategia dual:<br/>
+        <strong>Auto:</strong> intenta HTTP rápido, si falla usa un navegador headless real (Puppeteer).<br/>
+        Soporta <strong>hgcloud.to</strong>, StreamWish, Embedwish y similares.
+        Extrae el <code>.m3u8</code> real aunque aparezca como <code>.txt</code>.
+      </div>
+    </div>
+    <!-- Selector de modo -->
+    <div id="modeSelector" style="display:none">
+      <label for="extractMode" style="font-size:0.75rem;color:var(--text-muted);font-weight:600;text-transform:uppercase;letter-spacing:1px">Estrategia</label>
+      <div style="display:flex;gap:8px;margin-top:6px">
+        <label style="display:flex;align-items:center;gap:6px;font-size:0.82rem;color:var(--text-secondary);cursor:pointer">
+          <input type="radio" name="extractMode" value="auto" checked id="modeAuto"/> Auto (recomendado)
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;font-size:0.82rem;color:var(--text-secondary);cursor:pointer">
+          <input type="radio" name="extractMode" value="http" id="modeHttp"/> Solo HTTP (rápido)
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;font-size:0.82rem;color:var(--text-secondary);cursor:pointer">
+          <input type="radio" name="extractMode" value="puppeteer" id="modePuppeteer"/> 🤖 Puppeteer (seguro)
+        </label>
+      </div>
+    </div>
+
+    <div class="input-row">
+      <input
+        id="videoUrl"
+        class="url-input"
+        type="url"
+        placeholder="https://dood.re/e/abc123 · https://hgcloud.to/e/... · https://URL-directa.m3u8"
+        autocomplete="off"
+        spellcheck="false"
+      />
+      <button id="playBtn" class="play-btn" onclick="handleSubmit()">
+        <span class="spinner" id="spinner"></span>
+        <span id="playBtnText">▶ Reproducir</span>
+      </button>
+    </div>
+
+    <div class="quick-examples" id="examplesPlay">
+      <span>Ejemplos:</span>
+      <div class="example-chip" onclick="setExample('doodstream')">Doodstream</div>
+      <div class="example-chip" onclick="setExample('streamtape')">Streamtape</div>
+      <div class="example-chip" onclick="setExample('streamwish')">Streamwish</div>
+      <div class="example-chip" onclick="setExample('dailymotion')">Dailymotion</div>
+      <div class="example-chip" onclick="setExample('direct')">M3U8 directo</div>
+    </div>
+
+    <div class="quick-examples" id="examplesExtract" style="display:none">
+      <span>Ejemplos:</span>
+      <div class="example-chip highlight" onclick="setExampleExtract('hgcloud')">hgcloud.to</div>
+      <div class="example-chip highlight" onclick="setExampleExtract('streamwish')">streamwish.com</div>
+      <div class="example-chip highlight" onclick="setExampleExtract('embedwish')">embedwish.com</div>
+      <div class="example-chip" onclick="setExampleExtract('direct')">M3U8 directo</div>
+    </div>
+  </div>
+
+  <!-- Status bar -->
+  <div class="status-bar idle" id="statusBar">
+    <div class="status-dot"></div>
+    <span id="statusText">Introduce una URL y presiona Reproducir</span>
+    <span class="status-provider" id="providerBadge"></span>
+  </div>
+
+  <!-- Log card (solo visible en modo extract) -->
+  <div class="log-card" id="logCard">
+    <div class="log-header">
+      <span>📋 Log de extracción</span>
+      <button class="log-clear" onclick="clearLog()">Limpiar</button>
+    </div>
+    <div class="log-body" id="logBody"></div>
+  </div>
+
+  <!-- Player -->
+  <div class="video-wrapper" id="videoWrapper">
+    <div class="video-placeholder" id="placeholder">
+      <div class="play-icon">▶</div>
+      <p>Tu video aparecerá aquí.<br/>Soporta MP4, HLS/M3U8 y archivos .txt HLS.</p>
+    </div>
+    <video id="videoPlayer" controls></video>
+    <video id="videoPlayer" controls></video>
+    <!-- Controles de HLS mejorados -->
+    <div id="hlsControls" style="display:none; position:absolute; top:15px; right:15px; background:rgba(10,11,15,0.95); padding:10px 14px; border-radius:12px; border:1px solid var(--accent); display:flex; flex-direction:column; gap:8px; z-index:9999; backdrop-filter:blur(12px); box-shadow: 0 8px 32px rgba(0,0,0,0.7);">
+      <div style="display:flex; flex-direction:column; gap:4px;">
+        <label style="font-size:0.6rem; color:var(--accent-light); font-weight:700; text-transform:uppercase; letter-spacing:0.5px;">Calidad</label>
+        <select id="qualitySelect" style="background:var(--bg-input); color:var(--text-primary); border:1px solid var(--border); border-radius:6px; font-size:0.8rem; padding:4px 8px; cursor:pointer; outline:none; border: 1px solid rgba(255,255,255,0.1);"></select>
+      </div>
+      <div id="audioGroup" style="display:flex; flex-direction:column; gap:4px;">
+        <label style="font-size:0.6rem; color:var(--accent-light); font-weight:700; text-transform:uppercase; letter-spacing:0.5px;">Audio / Idioma</label>
+        <select id="audioSelect" style="background:var(--bg-input); color:var(--text-primary); border:1px solid var(--border); border-radius:6px; font-size:0.8rem; padding:4px 8px; cursor:pointer; outline:none; border: 1px solid rgba(255,255,255,0.1);"></select>
+      </div>
+    </div>
+  </div>
+
+  <!-- Info grid -->
+  <div class="info-grid" id="infoGrid" style="display:none">
+    <div class="info-card">
+      <div class="label">Proveedor</div>
+      <div class="value" id="infoProvider">—</div>
+    </div>
+    <div class="info-card">
+      <div class="label">Formato</div>
+      <div class="value" id="infoType">—</div>
+    </div>
+    <div class="info-card" id="infoHlsTxtCard" style="display:none">
+      <div class="label">Nota</div>
+      <div class="value" style="font-size:0.8rem;color:var(--yellow)">
+        ⚠ Enlace .txt tratado como HLS
+      </div>
+    </div>
+    <div class="info-card" style="grid-column:1/-1">
+      <div class="label">URL real del video (clic para copiar)</div>
+      <div class="value url-value" id="infoUrl" title="Haz clic para copiar" onclick="copyUrl()">—</div>
+    </div>
+  </div>
+
+</main>
+
+<!-- Footer -->
+<footer>
+  VideoProxy Player &nbsp;·&nbsp; Node.js + Express + HLS.js &nbsp;·&nbsp;
+  /play · /extract · /proxy &nbsp;·&nbsp; 100% gratuito · CORS-free
+</footer>
+
+<div id="toast-container"></div>
+
+<script>
+/* ═══════════════════════════════════════════════════════════
+   ESTADO
+═══════════════════════════════════════════════════════════ */
+let hls        = null;
+let currentUrl = '';
+let currentMode = 'play'; // 'play' | 'extract'
+
+/* ═══════════════════════════════════════════════════════════
+   EJEMPLOS
+═══════════════════════════════════════════════════════════ */
+const EXAMPLES_PLAY = {
+  doodstream: 'https://dood.re/e/EJEMPLO_ID',
+  streamtape: 'https://streamtape.com/e/EJEMPLO_ID',
+  streamwish:  'https://streamwish.com/e/EJEMPLO_ID',
+  dailymotion: 'https://www.dailymotion.com/video/x9aqv2x',
+  direct:      'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8',
+};
+
+const EXAMPLES_EXTRACT = {
+  hgcloud:    'https://hgcloud.to/e/yvapz6js5a01',
+  streamwish: 'https://streamwish.com/e/EJEMPLO_ID',
+  embedwish:  'https://embedwish.com/e/EJEMPLO_ID',
+  direct:     'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8',
+};
+
+function setExample(key) {
+  document.getElementById('videoUrl').value = EXAMPLES_PLAY[key];
+  if (key === 'direct') handleSubmit();
+}
+
+function setExampleExtract(key) {
+  const url = EXAMPLES_EXTRACT[key];
+  document.getElementById('videoUrl').value = url;
+  if (key === 'direct') handleSubmit();
+}
+
+/* ═══════════════════════════════════════════════════════════
+   TABS – Cambiar entre /play y /extract
+═══════════════════════════════════════════════════════════ */
+function switchMode(mode) {
+  currentMode = mode;
+  const isExtract = mode === 'extract';
+
+  document.getElementById('tabPlay').classList.toggle('active',    !isExtract);
+  document.getElementById('tabExtract').classList.toggle('active',  isExtract);
+
+  document.getElementById('examplesPlay').style.display    = isExtract ? 'none' : 'flex';
+  document.getElementById('examplesExtract').style.display = isExtract ? 'flex' : 'none';
+  document.getElementById('extractCallout').style.display  = isExtract ? 'flex' : 'none';
+  document.getElementById('modeSelector').style.display    = isExtract ? 'block' : 'none';
+  document.getElementById('logCard').style.display         = isExtract ? 'block' : 'none';
+
+  document.getElementById('inputLabel').textContent = isExtract
+    ? 'URL de StreamWish / HGCloud / Embed'
+    : 'URL de video o página embed';
+
+  document.getElementById('videoUrl').placeholder = isExtract
+    ? 'https://hgcloud.to/e/yvapz6js5a01  ·  https://streamwish.com/e/...'
+    : 'https://dood.re/e/abc123  ·  https://hgcloud.to/e/...  ·  https://URL.m3u8';
+
+  document.getElementById('playBtnText').textContent = isExtract ? '🔍 Extraer' : '▶ Reproducir';
+}
+
+/* ═══════════════════════════════════════════════════════════
+   DISPATCH: elige endpoint según modo
+═══════════════════════════════════════════════════════════ */
+async function handleSubmit() {
+  if (currentMode === 'extract') {
+    await loadExtract();
+  } else {
+    await loadVideo();
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════
+   /play – flujo universal
+═══════════════════════════════════════════════════════════ */
+async function loadVideo() {
+  const url = document.getElementById('videoUrl').value.trim();
+  if (!url) return showToast('Introduce una URL', 'error');
+
+  setStatus('loading', '⏳ Obteniendo enlace real del video…');
+  setPlayerVisible(false);
+  document.getElementById('infoGrid').style.display = 'none';
+  setBusy(true);
+
+  try {
+    const res  = await fetch(`/play?url=${encodeURIComponent(url)}`);
+    const data = await res.json();
+    if (!res.ok || data.error) throw new Error(data.error || `HTTP ${res.status}`);
+
+    const { proxyUrl, videoUrl, type, provider } = data;
+    currentUrl = videoUrl;
+
+    setStatus('success', `✔ Enlace obtenido · Tipo: ${type.toUpperCase()}`, provider);
+    updateInfo(provider, type, videoUrl, false);
+    showPlayer(proxyUrl, type);
+    showToast(`✔ Reproduciendo via ${provider}`, 'success');
+  } catch (err) {
+    setStatus('error', `✖ Error: ${err.message}`);
+    showToast(err.message, 'error');
+  } finally {
+    setBusy(false);
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════
+   /extract – StreamWish / HGCloud dedicado
+═══════════════════════════════════════════════════════════ */
+async function loadExtract() {
+  const url = document.getElementById('videoUrl').value.trim();
+  if (!url) return showToast('Introduce una URL', 'error');
+
+  clearLog();
+  appendLog(`→ Enviando a /extract: ${url}`, 'ok');
+  setStatus('loading', '⏳ Extrayendo enlace real (StreamWish/HGCloud)…');
+  setPlayerVisible(false);
+  document.getElementById('infoGrid').style.display = 'none';
+  setBusy(true);
+
+  try {
+    const mode = document.querySelector('input[name="extractMode"]:checked')?.value || 'auto';
+    appendLog(`→ Modo: ${mode}`, 'ok');
+    const res  = await fetch(`/extract?url=${encodeURIComponent(url)}&mode=${mode}`);
+    const data = await res.json();
+
+    if (!res.ok || !data.ok) {
+      appendLog(`✖ ${data.error || `HTTP ${res.status}`}`, 'err');
+      throw new Error(data.error || `HTTP ${res.status}`);
+    }
+
+    const { proxyUrl, videoUrl, type, provider, isHlsTxt, method } = data;
+    currentUrl = videoUrl;
+
+    appendLog(`✔ Proveedor: ${provider}`, 'ok');
+    appendLog(`✔ Método: ${method === 'puppeteer' ? '🤖 Puppeteer' : '🌐 HTTP'}`, 'ok');
+    appendLog(`✔ Tipo: ${type}${isHlsTxt ? ' (.txt → HLS)' : ''}`, 'ok');
+    appendLog(`✔ videoUrl: ${videoUrl.substring(0, 100)}`, 'ok');
+    appendLog(`✔ proxyUrl construida`, 'ok');
+
+    setStatus('success', `✔ ${method === 'puppeteer' ? '🤖' : '🌐'} Extracción exitosa · ${type.toUpperCase()}${isHlsTxt ? ' (via .txt)' : ''}`, provider);
+    updateInfo(provider, type, videoUrl, isHlsTxt);
+    showPlayer(proxyUrl, 'm3u8'); // siempre HLS.js para extract
+    showToast(`✔ Video extraído de ${provider}`, 'success');
+
+  } catch (err) {
+    setStatus('error', `✖ Error: ${err.message}`);
+    showToast(err.message, 'error');
+    appendLog(`✖ ${err.message}`, 'err');
+  } finally {
+    setBusy(false);
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════
+   PLAYER
+═══════════════════════════════════════════════════════════ */
+function showPlayer(url, type) {
+  const video = document.getElementById('videoPlayer');
+  if (hls) { hls.destroy(); hls = null; }
+  setPlayerVisible(true);
+
+  if (type === 'm3u8') {
+    if (Hls.isSupported()) {
+      hls = new Hls({ enableWorker: true, maxBufferLength: 30 });
+      hls.loadSource(url);
+      hls.attachMedia(video);
+      hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        setupHlsUI();
+        video.play().catch(() => {});
+      });
+      hls.on(Hls.Events.ERROR, (_, d) => {
+        if (d.fatal) {
+          appendLog(`✖ HLS error: ${d.details}`, 'err');
+          setStatus('error', `✖ HLS error: ${d.details}`);
+        }
+      });
+    } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+      video.src = url;
+      video.play().catch(() => {});
+    }
+  } else {
+    document.getElementById('hlsControls').style.display = 'none';
+    video.src = url;
+    video.play().catch(() => {});
+  }
+}
+
+function setupHlsUI() {
+  if (!hls) return;
+  const qSelect = document.getElementById('qualitySelect');
+  const aSelect = document.getElementById('audioSelect');
+  const aGroup  = document.getElementById('audioGroup');
+  const controls = document.getElementById('hlsControls');
+
+  // Calidad
+  qSelect.innerHTML = '<option value="-1">Auto</option>';
+  hls.levels.forEach((level, index) => {
+    const name = level.name || (level.height ? `${level.height}p` : `Lvl ${index}`);
+    const option = document.createElement('option');
+    option.value = index;
+    option.textContent = name;
+    qSelect.appendChild(option);
+  });
+  qSelect.onchange = () => {
+    hls.currentLevel = parseInt(qSelect.value);
+    showToast('Cambiando calidad...');
+  };
+
+  // Audio
+  if (hls.audioTracks && hls.audioTracks.length > 1) {
+    aGroup.style.display = 'flex';
+    aSelect.innerHTML = '';
+    hls.audioTracks.forEach((track, index) => {
+      const option = document.createElement('option');
+      option.value = index;
+      option.textContent = track.name || track.lang || `Audio ${index + 1}`;
+      if (index === hls.audioTrack) option.selected = true;
+      aSelect.appendChild(option);
+    });
+    aSelect.onchange = () => {
+      hls.audioTrack = parseInt(aSelect.value);
+      showToast('Cambiando idioma...');
+    };
+  } else {
+    aGroup.style.display = 'none';
+  }
+  controls.style.display = (hls.levels.length > 1 || (hls.audioTracks && hls.audioTracks.length > 1)) ? 'flex' : 'none';
+}
+
+/* ═══════════════════════════════════════════════════════════
+   LOG
+═══════════════════════════════════════════════════════════ */
+function appendLog(text, cls = '') {
+  const body = document.getElementById('logBody');
+  const line = document.createElement('div');
+  line.className = `log-line ${cls}`;
+  line.textContent = `[${new Date().toLocaleTimeString()}] ${text}`;
+  body.appendChild(line);
+  body.scrollTop = body.scrollHeight;
+}
+
+function clearLog() {
+  document.getElementById('logBody').innerHTML = '';
+}
+
+/* ═══════════════════════════════════════════════════════════
+   HELPERS UI
+═══════════════════════════════════════════════════════════ */
+function setPlayerVisible(visible) {
+  document.getElementById('videoPlayer').style.display   = visible ? 'block' : 'none';
+  document.getElementById('placeholder').style.display   = visible ? 'none'  : 'flex';
+}
+
+function setStatus(state, text, provider = '') {
+  const bar   = document.getElementById('statusBar');
+  const txt   = document.getElementById('statusText');
+  const badge = document.getElementById('providerBadge');
+  bar.className     = `status-bar ${state}`;
+  txt.textContent   = text;
+  badge.textContent = provider ? provider.toUpperCase() : '';
+  badge.className   = `status-provider ${provider ? 'visible' : ''}`;
+}
+
+function updateInfo(provider, type, videoUrl, isHlsTxt) {
+  document.getElementById('infoProvider').textContent = provider;
+
+  const typeLabel = isHlsTxt ? 'txt' : type;
+  document.getElementById('infoType').innerHTML =
+    `<span class="tag ${typeLabel}">${type.toUpperCase()}${isHlsTxt ? ' (.txt)' : ''}</span>`;
+
+  document.getElementById('infoHlsTxtCard').style.display = isHlsTxt ? '' : 'none';
+
+  const urlEl = document.getElementById('infoUrl');
+  urlEl.textContent = videoUrl;
+  urlEl.title = videoUrl;
+  document.getElementById('infoGrid').style.display = 'grid';
+}
+
+function setBusy(busy) {
+  const btn     = document.getElementById('playBtn');
+  const spinner = document.getElementById('spinner');
+  const txt     = document.getElementById('playBtnText');
+  btn.disabled          = busy;
+  spinner.style.display = busy ? 'block' : 'none';
+  if (!busy) txt.textContent = currentMode === 'extract' ? '🔍 Extraer' : '▶ Reproducir';
+  else       txt.textContent = 'Cargando…';
+}
+
+function copyUrl() {
+  if (!currentUrl) return;
+  navigator.clipboard.writeText(currentUrl).then(() => showToast('URL copiada', 'success'));
+}
+
+function showToast(message, type = 'success') {
+  const c     = document.getElementById('toast-container');
+  const toast = document.createElement('div');
+  toast.className   = `toast ${type}`;
+  toast.textContent = message;
+  c.appendChild(toast);
+  setTimeout(() => toast.remove(), 4000);
+}
+
+/* Enter key */
+document.getElementById('videoUrl').addEventListener('keydown', e => {
+  if (e.key === 'Enter') handleSubmit();
+});
+</script>
+</body>
+</html>
