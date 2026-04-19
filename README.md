@@ -1,65 +1,29 @@
-# 📡 VideoProxy Server
+# 🌐 Video Streaming Proxy (HGCloud & StreamWish)
 
-Backend proxy **100% gratuito** para reproducir videos desde Doodstream, Streamtape, Streamwish, Filemoon, Dailymotion y más, evitando restricciones CORS.
+Servidor proxy robusto desarrollado en Node.js para extraer y reproducir videos de proveedores protegidos (HGCloud, StreamWish, Doodstream, etc.) sin restricciones de CORS y con soporte para múltiples idiomas y calidades.
 
-## ⚡ Instalación y uso rápido
+## 🚀 Características
+- **Extracción Inteligente**: Sistema dual (HTTP + Puppeteer) para saltar protecciones de JavaScript.
+- **Multi-Idioma**: Soporte completo para elegir pistas de audio (Español, Inglés, etc.).
+- **Selector de Calidad**: Permite cambiar entre 1080p, 720p, 480p o modo Automático.
+- **Filtro Anti-Trabas**: Elimina anuncios y trackers que bloquean la reproducción.
+- **Embed Ready**: Genera enlaces listos para compartir o insertar en otras webs.
 
-```bash
-# 1. Instalar dependencias
-npm install
+## 🔗 Cómo compartir videos
+Para compartir un video con tus compañeros, usa el siguiente formato de URL:
 
-# 2. Iniciar el servidor
-node server.js
+`https://TU-DOMINIO.onrender.com/v?url=URL_DEL_VIDEO`
 
-# 3. Abrir el reproductor
-# → http://localhost:3000
-```
+**Ejemplo:**
+`https://TU-DOMINIO.onrender.com/v?url=https://hgcloud.to/e/yvapz6js5a01`
 
-## 🔌 Endpoints
+## 🛠️ Instalación y Despliegue (Render.com)
+1. Conecta este repositorio a un **Web Service** en Render.
+2. Render detectará el `Dockerfile` automáticamente.
+3. Asegúrate de que el puerto sea el `3000`.
 
-| Endpoint | Descripción |
-|---|---|
-| `GET /play?url=<URL>` | Extrae el enlace real del video y devuelve JSON |
-| `GET /proxy?url=<URL>&referer=<REF>` | Sirve el contenido del video evitando CORS |
+## 🔋 Mantener 24/7 Gratis
+Como Render duerme los servicios gratuitos tras 15 min de inactividad, usa [Cron-job.org](https://cron-job.org) para hacer un "ping" a tu URL cada 10 minutos.
 
-### Respuesta de `/play`
-```json
-{
-  "videoUrl": "https://cdn.ejemplo.com/video.mp4",
-  "proxyUrl": "http://localhost:3000/proxy?url=...&referer=...",
-  "type": "mp4",
-  "provider": "doodstream"
-}
-```
-
-## 🎬 Proveedores soportados
-
-- ✅ **Doodstream** (dood.re, dood.so, dood.watch, ds2play.com…)
-- ✅ **Streamtape** (streamtape.com, streamtape.net…)
-- ✅ **Streamwish / Embedwish / Vidhide**
-- ✅ **Filemoon**
-- ✅ **Dailymotion** (API pública — sin clave)
-- ✅ **URLs directas** (mp4, m3u8, webm)
-- ✅ **Genérico** (scraping de cualquier página)
-
-## 📂 Estructura del proyecto
-
-```
-/project
-  /public       → Frontend HTML (reproductor)
-  /routes       → play.js, proxy.js
-  /controllers  → playController.js, proxyController.js
-  /services     → doodstream.js, streamtape.js, streamwish.js, filemoon.js, dailymotion.js, generic.js
-  /utils        → browserHeaders.js, urlDetector.js, axiosClient.js
-  server.js
-  package.json
-```
-
-## 🔑 Características
-
-- **Sin caché**: genera un enlace nuevo en cada solicitud
-- **Range requests**: soporta adelantar/retroceder en MP4
-- **M3U8 rewrite**: reescribe todos los segmentos .ts para que pasen por el proxy
-- **Reintentos automáticos**: hasta 3 intentos por proveedor
-- **Headers de Chrome**: simula un navegador real
-- **100% gratuito**: solo Node.js + librerías open source
+---
+**Desarrollado para yeflix2025**
