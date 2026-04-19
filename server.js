@@ -20,6 +20,9 @@ const { embedHandler } = require('./controllers/embedController');
 const app  = express();
 const PORT = process.env.PORT || 3000;
 
+// Configurar confianza en el proxy para Render/HTTPS
+app.set('trust proxy', true);
+
 // ── Middlewares globales ──────────────────────────────────────
 app.use(cors({ origin: '*', methods: ['GET', 'HEAD', 'OPTIONS'] }));
 app.use(express.json());
