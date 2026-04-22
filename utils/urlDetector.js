@@ -48,6 +48,15 @@ const PROVIDERS = {
     /bysesukior\.com/i,
     /398fitus\.com/i,
   ],
+  earvids: [
+    /minochinos\.com/i,
+  ],
+  voe: [
+    /voe\.sx/i,
+    /charlestoughrace\.com/i,
+    /reitshof\.com/i,
+    /v-o-e\.com/i,
+  ],
   mp4upload: [
     /mp4upload\.com/i,
   ],

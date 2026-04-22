@@ -12,6 +12,7 @@ const streamwish            = require('../services/streamwish');
 const doodstream            = require('../services/doodstream');
 const streamtape            = require('../services/streamtape');
 const filemoon              = require('../services/filemoon');
+const voe                   = require('../services/voe');
 const dailymotion           = require('../services/dailymotion');
 const generic               = require('../services/generic');
 const puppeteerExtractor    = require('../services/puppeteerExtractor');
@@ -23,6 +24,7 @@ const HTTP_SERVICE_MAP = {
   doodstream,
   streamtape,
   filemoon,
+  voe,
   dailymotion,
   direct     : generic,
   unknown    : generic,

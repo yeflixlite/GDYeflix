@@ -285,7 +285,7 @@
 
       <div class="input-field">
         <label style="font-size: 0.75rem; color: var(--text-secondary); font-weight: 700; text-transform: uppercase;">URL del Video</label>
-        <input type="text" id="urlInput" placeholder="Pega el enlace de Filemoon, Streamwish, etc..." spellcheck="false">
+        <input type="text" id="urlInput" placeholder="Pega el enlace de Filemoon, Streamwish, VOE, etc..." spellcheck="false">
       </div>
 
       <button class="btn-main" id="btnMain" onclick="handleStart()">
@@ -294,9 +294,10 @@
       </button>
 
       <div class="examples">
+        <div class="ex-chip premium" onclick="loadEx('https://minochinos.com/v/q5e4mv754sh5')">Earvids (Mino)</div>
+        <div class="ex-chip premium" onclick="loadEx('https://voe.sx/e/ibr5q1kl83ib')">VOE</div>
         <div class="ex-chip premium" onclick="loadEx('https://bysesukior.com/e/wjjrejwr7iza')">Filemoon (Suki)</div>
         <div class="ex-chip" onclick="loadEx('https://hgcloud.to/e/2uighyt93t26')">HGCloud</div>
-        <div class="ex-chip" onclick="loadEx('https://dood.re/e/Ejemplo')">Doodstream</div>
       </div>
 
       <div class="log-container" id="log">
