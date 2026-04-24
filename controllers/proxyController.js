@@ -42,8 +42,16 @@ function resolveUrl(target, base) {
   }
 
   // SI LA BASE TIENE PARÁMETROS (?, t=, s=, e=) Y EL TARGET NO, SE LOS PASAMOS
-  if (baseUrl.search && !resolved.search) {
-    resolved.search = baseUrl.search;
+  if (baseUrl.search) {
+    const baseParams = baseUrl.searchParams;
+    const targetParams = resolved.searchParams;
+    
+    // Parámetros críticos de StreamWish/Filemoon
+    ['t', 's', 'e', 'token'].forEach(p => {
+      if (baseParams.has(p) && !targetParams.has(p)) {
+        targetParams.set(p, baseParams.get(p));
+      }
+    });
   }
 
   return resolved.toString();
@@ -97,7 +105,16 @@ async function proxyHandler(req, res, next) {
        console.log(`[Proxy] 📄 Manifest: ${decodedUrl.substring(0, 70)}...`);
     }
 
-    const headers = getMediaHeaders(decodedReferer || origin, origin);
+    // LOGICA DE REFERER: Muchos CDNs (como medixiru, dohaxe) requieren que el referer
+    // sea el mismo dominio del video o el dominio embed original.
+    let targetOrigin = '';
+    try { targetOrigin = new URL(decodedUrl).origin; } catch {}
+    
+    // Si no se pasó un referer explícito, usamos el origin del video como fallback
+    // Esto suele saltarse protecciones de Hotlink.
+    const effectiveReferer = decodedReferer || targetOrigin;
+
+    const headers = getMediaHeaders(effectiveReferer, targetOrigin);
     if (req.headers.range) {
       headers['Range'] = req.headers.range;
     }
@@ -108,7 +125,7 @@ async function proxyHandler(req, res, next) {
       httpAgent,
       httpsAgent,
       maxRedirects: 10,
-      timeout: 15_000, 
+      timeout: 20_000, 
       validateStatus: (status) => status < 400,
     });
 

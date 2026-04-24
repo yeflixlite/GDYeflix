@@ -11,29 +11,14 @@
 const puppeteer = require('puppeteer');
 
 /**
- * Extensiones que identifican un stream de video
- */
-const VIDEO_PATTERNS = [
-  /\.m3u8(\?|$)/i,
-  /master\.txt(\?|#|$)/i,
-  /playlist\.txt(\?|#|$)/i,
-  /\/hls\//i,
-  /\.mp4(\?|$)/i,
-];
-
-function isVideoUrl(url) {
-  return VIDEO_PATTERNS.some(p => p.test(url));
-}
-
-/**
  * Lanza Puppeteer y monitorea las peticiones de red.
  * Devuelve el primer enlace de video detectado.
  */
-async function extractWithPuppeteer(embedUrl, timeoutMs = 25_000) {
+async function extractWithPuppeteer(embedUrl, timeoutMs = 60_000) {
   console.log(`[Puppeteer] 🚀 Iniciando navegador headless...`);
 
   const browser = await puppeteer.launch({
-    headless: 'new', // Usa el nuevo modo headless
+    headless: 'new',
     args: [
       '--no-sandbox',
       '--disable-setuid-sandbox',
@@ -55,90 +40,75 @@ async function extractWithPuppeteer(embedUrl, timeoutMs = 25_000) {
       'Chrome/124.0.0.0 Safari/537.36'
     );
 
-    await page.setExtraHTTPHeaders({
-      'Accept-Language': 'es-ES,es;q=0.9,en-US;q=0.8',
-      'Referer':         'https://www.google.com/',
-    });
+    let videoUrl = null;
 
-    // ── Intercepta todas las peticiones de red ───────────────
-    const foundUrls = [];
-    await page.setRequestInterception(true);
-
-    page.on('request', (req) => {
-      const url = req.url();
-      if (isVideoUrl(url)) {
-        console.log(`[Puppeteer] 📡 Interceptada petición: ${url.substring(0, 100)}`);
-        foundUrls.push(url);
-      }
-      const type = req.resourceType();
-      if (['image', 'stylesheet', 'font'].includes(type)) {
-        req.abort();
-      } else {
-        req.continue();
-      }
-    });
-
-    // También captura respuestas
-    page.on('response', (resp) => {
-      const url = resp.url();
-      const ct  = resp.headers()['content-type'] || '';
-      if (ct.includes('mpegurl') || ct.includes('m3u8') || isVideoUrl(url)) {
-        if (!foundUrls.includes(url)) {
-          console.log(`[Puppeteer] 📡 Interceptada respuesta: ${url.substring(0, 100)}`);
-          foundUrls.push(url);
+    // Escuchar peticiones de red
+    page.on('request', (request) => {
+        const url = request.url();
+        if (url.includes('.m3u8') || url.includes('.mp4') || url.includes('master.txt')) {
+            if (!url.includes('test-videos.co.uk') && !url.includes('googlevideo.com')) {
+                videoUrl = url;
+            }
         }
-      }
     });
 
-    console.log(`[Puppeteer] 🌐 Cargando: ${embedUrl}`);
+    // Escuchar respuestas
+    page.on('response', (response) => {
+        const url = response.url();
+        if (url.includes('.m3u8') || url.includes('.mp4') || url.includes('master.txt')) {
+             if (!url.includes('test-videos.co.uk') && !url.includes('googlevideo.com')) {
+                videoUrl = url;
+            }
+        }
+    });
+
+    console.log(`[Puppeteer] 🌐 Navegando a: ${embedUrl}`);
+    
+    // Cargar la página y esperar un poco
     await page.goto(embedUrl, {
-      waitUntil: 'networkidle2', // Espera a que la red esté tranquila
-      timeout   : timeoutMs,
-    });
+        waitUntil: 'networkidle2',
+        timeout: 60000
+    }).catch(() => {});
 
-    // Espera hasta que se encuentre una URL o timeout
-    const found = await new Promise((resolve) => {
-      const check = setInterval(() => {
-        if (foundUrls.length > 0) {
-          clearInterval(check);
-          resolve(foundUrls[0]);
-        }
-      }, 500);
-
-      setTimeout(() => {
-        clearInterval(check);
-        resolve(foundUrls[0] || null);
-      }, timeoutMs);
-    });
-
-    if (!found) {
-      throw new Error('Puppeteer no detectó ningún enlace de video.');
+    // Si no se capturó por red, intentar un click en el centro
+    if (!videoUrl) {
+        console.log('[Puppeteer] Intentando click de activación...');
+        await page.mouse.click(640, 360);
+        await new Promise(r => setTimeout(r, 5000));
     }
 
-    console.log(`[Puppeteer] ✅ Enlace encontrado: ${found.substring(0, 100)}`);
-    return found;
+    if (videoUrl) {
+        console.log(`[Puppeteer] ✅ Enlace detectado: ${videoUrl.substring(0, 80)}...`);
+        return {
+            videoUrl,
+            type: videoUrl.includes('.mp4') ? 'mp4' : 'm3u8',
+            referer: embedUrl
+        };
+    }
 
+    // Fallback final: buscar en el DOM
+    const content = await page.content();
+    const m3u8Match = content.match(/['"](https?:\/\/[^'"]+\.m3u8[^'"]*)['"]/i);
+    if (m3u8Match) {
+        return {
+            videoUrl: m3u8Match[1],
+            type: 'm3u8',
+            referer: embedUrl
+        };
+    }
+
+    throw new Error('No se pudo encontrar el enlace de video en la página.');
+
+  } catch (error) {
+    console.error(`[Puppeteer] ❌ Error: ${error.message}`);
+    throw error;
   } finally {
     await browser.close();
-    console.log(`[Puppeteer] 🔒 Navegador cerrado.`);
   }
 }
 
-/**
- * Interfaz pública: extract(url) → { videoUrl, type, referer }
- */
 async function extract(url) {
-  const origin   = (() => { try { return new URL(url).origin; } catch { return ''; } })();
-  const videoUrl = await extractWithPuppeteer(url);
-
-  const type = (
-    /\.m3u8/i.test(videoUrl) ||
-    /master\.txt/i.test(videoUrl) ||
-    /playlist\.txt/i.test(videoUrl) ||
-    /\/hls\//i.test(videoUrl)
-  ) ? 'm3u8' : 'mp4';
-
-  return { videoUrl, type, referer: origin };
+  return await extractWithPuppeteer(url);
 }
 
 module.exports = { extract };

@@ -30,18 +30,26 @@ const PROVIDERS = {
     /cilootv\.store/i,
     /bestx\.stream/i,
     /moviesapi\.club/i,
+    /hglamioz\.com/i,
+    /streamhg\.com/i,
   ],
-  // hgcloud.to es un CDN/dominio alternativo de StreamWish
   hgcloud: [
     /hgcloud\.(to|net|cc|me)/i,
   ],
   vidhide: [
     /vidhide\.com/i,
     /vidhidepro\.com/i,
+    /vidhidevip\.com/i,
+    /vidhideplay\.com/i,
     /ahvide\.com/i,
+    /vhid\.to/i,
+    /vplay\.to/i,
+    /vidhide\.net/i,
+    /hveembed\.com/i,
+    /vsharea\.com/i,
   ],
   filemoon: [
-    /filemoon\.sx/i,
+    /filemoon\.(sx|com|to)/i,
     /filemooon\.com/i,
     /moonplayer\.net/i,
     /bysejikuar\.com/i,
@@ -50,12 +58,14 @@ const PROVIDERS = {
   ],
   earvids: [
     /minochinos\.com/i,
+    /earvids\.com/i,
   ],
   voe: [
     /voe\.sx/i,
     /charlestoughrace\.com/i,
     /reitshof\.com/i,
     /v-o-e\.com/i,
+    /voe-video\.com/i,
   ],
   mp4upload: [
     /mp4upload\.com/i,
@@ -78,9 +88,12 @@ const PROVIDERS = {
  * @returns {string}  proveedor detectado
  */
 function detectProvider(url) {
+  if (!url) return 'unknown';
   for (const [provider, patterns] of Object.entries(PROVIDERS)) {
-    for (const pattern of patterns) {
-      if (pattern.test(url)) return provider;
+    if (Array.isArray(patterns)) {
+      for (const pattern of patterns) {
+        if (pattern.test(url)) return provider;
+      }
     }
   }
   return 'unknown';
@@ -119,4 +132,4 @@ function extractVideoId(url, provider) {
   }
 }
 
-module.exports = { detectProvider, extractVideoId };
+module.exports = { detectProvider, extractVideoId, PROVIDERS };

@@ -45,9 +45,23 @@ async function extract(url) {
     const m3u8Match = html.match(/['"](https?:\/\/[^'"]+\.m3u8[^'"]*)['"]/i);
     
     if (m3u8Match) {
-        console.log(`[Earvids] ✅ Enlace m3u8 encontrado: ${m3u8Match[1].substring(0, 60)}...`);
+        let finalVideoUrl = m3u8Match[1];
+        const searchParams = new URL(url).search;
+
+        // Inyectar tokens si existen
+        if (searchParams && !finalVideoUrl.includes('t=')) {
+            const videoU = new URL(finalVideoUrl);
+            const originalParams = new URLSearchParams(searchParams);
+            originalParams.forEach((val, key) => {
+                if (!videoU.searchParams.has(key)) videoU.searchParams.set(key, val);
+            });
+            finalVideoUrl = videoU.toString();
+            console.log(`[Earvids] 🛡️ Tokens de seguridad inyectados.`);
+        }
+
+        console.log(`[Earvids] ✅ Enlace m3u8 encontrado: ${finalVideoUrl.substring(0, 60)}...`);
         return {
-            videoUrl: m3u8Match[1],
+            videoUrl: finalVideoUrl,
             type: 'm3u8',
             referer: url
         };

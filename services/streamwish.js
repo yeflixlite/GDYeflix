@@ -40,6 +40,8 @@ const STREAMWISH_DOMAINS = [
   'cilootv.store',
   'bestx.stream',
   'moviesapi.club',
+  'hglamioz.com',
+  'streamhg.com',
 ];
 
 /**
@@ -51,11 +53,11 @@ function normalizeUrl(rawUrl) {
 
   // Busca /e/<id>  o  /v/<id>
   let match = u.pathname.match(/\/[ev]\/([a-zA-Z0-9]+)/);
-  if (match) return `${u.origin}/e/${match[1]}`;
+  if (match) return `${u.origin}/e/${match[1]}${u.search}`;
 
   // Fallback: primer segmento del path como ID
   const segments = u.pathname.split('/').filter(Boolean);
-  if (segments.length) return `${u.origin}/e/${segments[0]}`;
+  if (segments.length) return `${u.origin}/e/${segments[0]}${u.search}`;
 
   throw new Error(`No se pudo normalizar la URL de StreamWish: ${rawUrl}`);
 }
@@ -117,30 +119,54 @@ function extractScripts(html) {
  */
 async function extract(url) {
   const embedUrl = normalizeUrl(url);
-  const origin   = new URL(embedUrl).origin;
-  const host     = new URL(embedUrl).hostname;
+  const u        = new URL(embedUrl);
+  const origin   = u.origin;
+  const host     = u.hostname;
+  const search   = u.search;
 
   console.log(`[StreamWish/${host}] 🔍 Accediendo a: ${embedUrl}`);
 
   let response = await fetchWithRetry(embedUrl, {
     referer : 'https://www.google.com/',
     origin,
+    timeout: 15000 // Timeout corto para el primer intento
   });
 
   let html = response.data;
 
-  // DETECCIÓN DE LOADING SHELL (SPA):
-  // Si el HTML es muy corto o contiene "Page is loading", intentamos forzar la carga real.
-  if (html.length < 2000 && html.includes('Page is loading')) {
-    console.log(`[StreamWish/${host}] ⏳ Detectada shell de carga, intentando bypass...`);
-    // A veces basta con esperar un segundo y reintentar con las cookies que nos dio
-    const cookies = response.headers['set-cookie'];
-    response = await fetchWithRetry(embedUrl, {
-      referer: embedUrl,
-      origin,
-      headers: { 'Cookie': cookies ? cookies.join('; ') : '' }
-    });
-    html = response.data;
+  // DETECCIÓN DE LOADING SHELL (SPA)
+  if (html.length < 2000 && (html.includes('Page is loading') || html.includes('Redirecting'))) {
+    console.log(`[StreamWish/${host}] ⏳ Detectada shell de carga en ${host}. Probando espejos rápidos...`);
+    
+    const id = u.pathname.split('/').filter(Boolean).pop();
+    const mirrors = ['wishembed.net', 'hglamioz.com', 'embedwish.com', 'awish.pro'];
+    
+    for (const mirror of mirrors) {
+      if (mirror === host) continue;
+      try {
+        const mirrorUrl = `https://${mirror}/e/${id}${u.search}`;
+        const mRes = await fetchWithRetry(mirrorUrl, { 
+            referer: 'https://google.com/', 
+            timeout: 5000 // Intentos muy rápidos
+        });
+        if (mRes.data.length > 5000 && !mRes.data.includes('Page is loading')) {
+          html = mRes.data;
+          console.log(`[StreamWish] ✅ Éxito con espejo rápido: ${mirror}`);
+          break;
+        }
+      } catch (e) {}
+    }
+
+    // Si aún es shell, intentar el bypass de cookies original
+    if (html.length < 2000 && html.includes('Page is loading')) {
+        const cookies = response.headers['set-cookie'];
+        response = await fetchWithRetry(embedUrl, {
+            referer: embedUrl,
+            origin,
+            headers: { 'Cookie': cookies ? cookies.join('; ') : '' }
+        });
+        html = response.data;
+    }
   }
 
   const scripts = extractScripts(html);
@@ -152,8 +178,12 @@ async function extract(url) {
     /\.setup\s*\(\s*\{[^}]*?sources\s*:\s*\[\s*\{[^}]*?file\s*:\s*["']([^"']+)["']/is
   );
   if (m && m[1].startsWith('http')) {
-    console.log(`[StreamWish/${host}] ✅ Estrategia 1 (jwplayer setup) → ${m[1].substring(0, 80)}`);
-    return { videoUrl: m[1], type: guessType(m[1]), referer: origin };
+    let videoUrl = m[1];
+    if (search && !videoUrl.includes('t=')) {
+        videoUrl += (videoUrl.includes('?') ? '&' : '?') + search.substring(1);
+    }
+    console.log(`[StreamWish/${host}] ✅ Estrategia 1 (jwplayer setup) → ${videoUrl.substring(0, 80)}`);
+    return { videoUrl, type: guessType(videoUrl), referer: origin };
   }
 
   /* ── Estrategia 2: file: "..." o file: '...' ────────────── */
@@ -169,37 +199,57 @@ async function extract(url) {
   for (const pat of filePatterns) {
     m = scripts.match(pat) || html.match(pat);
     if (m && m[1]) {
-      console.log(`[StreamWish/${host}] ✅ Estrategia 2 (file:) → ${m[1].substring(0, 80)}`);
-      return { videoUrl: m[1], type: guessType(m[1]), referer: origin };
+      let videoUrl = m[1];
+      if (search && !videoUrl.includes('t=')) {
+          videoUrl += (videoUrl.includes('?') ? '&' : '?') + search.substring(1);
+      }
+      console.log(`[StreamWish/${host}] ✅ Estrategia 2 (file:) → ${videoUrl.substring(0, 80)}`);
+      return { videoUrl, type: guessType(videoUrl), referer: origin };
     }
   }
 
   /* ── Estrategia 3: eval(atob(...)) ofuscado ─────────────── */
   const evalDecoded = tryDecodeEval(scripts);
   if (evalDecoded) {
-    console.log(`[StreamWish/${host}] ✅ Estrategia 3 (eval/atob) → ${evalDecoded.substring(0, 80)}`);
-    return { videoUrl: evalDecoded, type: guessType(evalDecoded), referer: origin };
+    let videoUrl = evalDecoded;
+    if (search && !videoUrl.includes('t=')) {
+        videoUrl += (videoUrl.includes('?') ? '&' : '?') + search.substring(1);
+    }
+    console.log(`[StreamWish/${host}] ✅ Estrategia 3 (eval/atob) → ${videoUrl.substring(0, 80)}`);
+    return { videoUrl, type: guessType(videoUrl), referer: origin };
   }
 
   /* ── Estrategia 4: sources array completo ───────────────── */
   m = scripts.match(/sources\s*:\s*\[\s*\{[^[\]]*?file\s*:\s*["'](https?:\/\/[^"']+)/is);
   if (m && m[1]) {
-    console.log(`[StreamWish/${host}] ✅ Estrategia 4 (sources[]) → ${m[1].substring(0, 80)}`);
-    return { videoUrl: m[1], type: guessType(m[1]), referer: origin };
+    let videoUrl = m[1];
+    if (search && !videoUrl.includes('t=')) {
+        videoUrl += (videoUrl.includes('?') ? '&' : '?') + search.substring(1);
+    }
+    console.log(`[StreamWish/${host}] ✅ Estrategia 4 (sources[]) → ${videoUrl.substring(0, 80)}`);
+    return { videoUrl, type: guessType(videoUrl), referer: origin };
   }
 
   /* ── Estrategia 5: cualquier URL con /hls/ o .txt en el HTML */
   const hlsInHtml = html.match(/https?:\/\/[^\s"'<>]*(?:\/hls\/|master\.txt|playlist\.txt)[^\s"'<>]*/i);
   if (hlsInHtml) {
-    console.log(`[StreamWish/${host}] ✅ Estrategia 5 (HLS en HTML) → ${hlsInHtml[0].substring(0, 80)}`);
-    return { videoUrl: hlsInHtml[0], type: 'm3u8', referer: origin };
+    let videoUrl = hlsInHtml[0];
+    if (search && !videoUrl.includes('t=')) {
+        videoUrl += (videoUrl.includes('?') ? '&' : '?') + search.substring(1);
+    }
+    console.log(`[StreamWish/${host}] ✅ Estrategia 5 (HLS en HTML) → ${videoUrl.substring(0, 80)}`);
+    return { videoUrl, type: 'm3u8', referer: origin };
   }
 
   /* ── Estrategia 6: cualquier m3u8 en todo el documento ──── */
   const anyM3u8 = html.match(/https?:\/\/[^\s"'<>]+\.m3u8[^\s"'<>]*/i);
   if (anyM3u8) {
-    console.log(`[StreamWish/${host}] ✅ Estrategia 6 (m3u8 en HTML) → ${anyM3u8[0].substring(0, 80)}`);
-    return { videoUrl: anyM3u8[0], type: 'm3u8', referer: origin };
+    let videoUrl = anyM3u8[0];
+    if (search && !videoUrl.includes('t=')) {
+        videoUrl += (videoUrl.includes('?') ? '&' : '?') + search.substring(1);
+    }
+    console.log(`[StreamWish/${host}] ✅ Estrategia 6 (m3u8 en HTML) → ${videoUrl.substring(0, 80)}`);
+    return { videoUrl, type: 'm3u8', referer: origin };
   }
 
   /* ── No encontrado ─────────────────────────────────────── */
