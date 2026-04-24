@@ -438,7 +438,17 @@
     hlsInstance.levels.forEach((lvl, i) => {
       const opt = document.createElement('option');
       opt.value = i;
-      opt.textContent = lvl.height ? lvl.height + 'p' : 'Nivel ' + i;
+      
+      // Intentar obtener la altura (ej. 720p), si no existe usar el nombre (ej. "720p" inyectado),
+      // y si tampoco existe, caer en el "Nivel X" por defecto.
+      let label = 'Nivel ' + i;
+      if (lvl.height && lvl.height > 0) {
+          label = lvl.height + 'p';
+      } else if (lvl.name) {
+          label = lvl.name;
+      }
+      
+      opt.textContent = label;
       qSelect.appendChild(opt);
     });
     qSelect.onchange = () => (hlsInstance.currentLevel = parseInt(qSelect.value));

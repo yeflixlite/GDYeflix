@@ -82,6 +82,32 @@ function rewriteM3u8(content, originalUrl, proxyBase, referer) {
     }
   );
 
+  // 3. Arreglo para "Nivel 0" (VOE / Filemoon)
+  // Aseguramos que la línea tenga RESOLUTION y NAME válidos.
+  // Algunos servidores envían RESOLUTION=0x0 que confunde al reproductor.
+  rewritten = rewritten.replace(
+    /#EXT-X-STREAM-INF:([^\r\n]+)/g,
+    (match, attributes) => {
+      let newAttributes = attributes;
+      let res = '1280x720';
+      let name = '"720p"';
+
+      if (attributes.includes('1080p') || attributes.includes('1920x1080')) { res = '1920x1080'; name = '"1080p"'; }
+      else if (attributes.includes('480p') || attributes.includes('854x480')) { res = '854x480'; name = '"480p"'; }
+      else if (attributes.includes('360p') || attributes.includes('640x360')) { res = '640x360'; name = '"360p"'; }
+      else if (attributes.includes('4K') || attributes.includes('2160p')) { res = '3840x2160'; name = '"4K"'; }
+
+      // Limpiar etiquetas rotas (ej: RESOLUTION=0x0)
+      newAttributes = newAttributes.replace(/,RESOLUTION=[^,]+/g, '');
+      newAttributes = newAttributes.replace(/,NAME=[^,]+/g, '');
+
+      // Inyectar etiquetas limpias
+      newAttributes += `,RESOLUTION=${res},NAME=${name}`;
+
+      return `#EXT-X-STREAM-INF:${newAttributes}`;
+    }
+  );
+
   return rewritten;
 }
 

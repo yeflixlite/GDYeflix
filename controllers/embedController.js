@@ -141,7 +141,10 @@ async function embedHandler(req, res, next) {
             hls.levels.forEach((l, i) => {
                 const opt = document.createElement('option');
                 opt.value = i;
-                opt.textContent = l.height ? l.height + 'p' : 'Nivel ' + i;
+                let label = 'Nivel ' + i;
+                if (l.height && l.height > 0) label = l.height + 'p';
+                else if (l.name) label = l.name;
+                opt.textContent = label;
                 q.appendChild(opt);
             });
             q.onchange = () => (hls.currentLevel = parseInt(q.value));

@@ -47,6 +47,7 @@ const PROVIDERS = {
     /vidhide\.net/i,
     /hveembed\.com/i,
     /vsharea\.com/i,
+    /minochinos\.com/i,
   ],
   filemoon: [
     /filemoon\.(sx|com|to)/i,
@@ -57,7 +58,6 @@ const PROVIDERS = {
     /398fitus\.com/i,
   ],
   earvids: [
-    /minochinos\.com/i,
     /earvids\.com/i,
   ],
   voe: [
@@ -116,8 +116,9 @@ function extractVideoId(url, provider) {
       }
       case 'streamwish':
       case 'vidhide':
-      case 'filemoon': {
-        const match = u.pathname.match(/\/e\/([a-zA-Z0-9]+)/);
+      case 'filemoon':
+      case 'earvids': {
+        const match = u.pathname.match(/\/[ev]\/([a-zA-Z0-9]+)/);
         return match ? match[1] : u.pathname.split('/').filter(Boolean)[0];
       }
       case 'dailymotion': {
