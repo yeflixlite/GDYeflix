@@ -118,10 +118,21 @@ function extractScripts(html) {
  * @returns {Promise<{ videoUrl: string, type: 'm3u8'|'mp4', referer: string }>}
  */
 async function extract(url) {
-  const embedUrl = normalizeUrl(url);
-  const u        = new URL(embedUrl);
-  const origin   = u.origin;
-  const host     = u.hostname;
+  let embedUrl = normalizeUrl(url);
+  let u = new URL(embedUrl);
+  let host = u.host;
+  const id = u.pathname.split('/').filter(Boolean).pop();
+
+  // OPTIMIZACIÓN EXTREMA: El espejo hglamioz.com no tiene Cloudflare agresivo.
+  // Forzamos TODAS las peticiones de Streamwish a pasar por este espejo primero.
+  if (host !== 'hglamioz.com' && host !== 'embedwish.com') {
+      embedUrl = `https://hglamioz.com/e/${id}${u.search}`;
+      u = new URL(embedUrl);
+      host = u.host;
+      console.log(`[StreamWish] 🔄 Redirigiendo URL principal a espejo rápido: ${embedUrl}`);
+  }
+
+  const origin   = `https://${host}`;
   const search   = u.search;
 
   console.log(`[StreamWish/${host}] 🔍 Accediendo a: ${embedUrl}`);
