@@ -101,7 +101,6 @@ async function extract(url) {
     return { videoUrl: finalUrl, type: 'mp4', referer: embedUrl };
 
   } finally {
-    isClosed = true;
     await browser.close();
   }
 }

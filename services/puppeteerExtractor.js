@@ -100,8 +100,6 @@ async function extractWithPuppeteer(embedUrl, timeoutMs = 60_000) {
         // Falló el race
     }
 
-    isClosed = true;
-
     if (videoUrl) {
         console.log(`[Puppeteer] ✅ Enlace detectado: ${videoUrl.substring(0, 80)}...`);
         return {
