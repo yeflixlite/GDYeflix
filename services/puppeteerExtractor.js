@@ -41,20 +41,23 @@ async function extractWithPuppeteer(embedUrl, timeoutMs = 60_000) {
     );
 
     let videoUrl = null;
+    let resolveVideo;
+    const videoPromise = new Promise(resolve => { resolveVideo = resolve; });
 
     // Helper para decidir si guardar la URL
     const updateVideoUrl = (url) => {
         if (url.includes('.m3u8') || url.includes('.mp4') || url.includes('master.txt') || url.includes('playlist.txt')) {
             if (!url.includes('test-videos.co.uk') && !url.includes('googlevideo.com') && !url.includes('adserver')) {
-                // Si la nueva URL tiene la palabra 'master', la preferimos siempre
+                // Si es un master, resolvemos inmediatamente para ganar velocidad
                 if (url.includes('master')) {
                     videoUrl = url;
+                    resolveVideo(url);
                 } 
-                // Si no teníamos nada, la guardamos
                 else if (!videoUrl) {
                     videoUrl = url;
+                    // No resolvemos aún, por si aparece un 'master' después, 
+                    // a menos que pase mucho tiempo
                 }
-                // (Si ya teníamos una URL con 'master', ignoramos las peticiones de index/segmentos)
             }
         }
     };
@@ -65,17 +68,28 @@ async function extractWithPuppeteer(embedUrl, timeoutMs = 60_000) {
 
     console.log(`[Puppeteer] 🌐 Navegando a: ${embedUrl}`);
     
-    // Cargar la página y esperar un poco
+    // Cargar la página rápidamente
     await page.goto(embedUrl, {
-        waitUntil: 'networkidle2',
-        timeout: 60000
+        waitUntil: 'domcontentloaded',
+        timeout: 30000
     }).catch(() => {});
 
-    // Si no se capturó por red, intentar un click en el centro
-    if (!videoUrl) {
-        console.log('[Puppeteer] Intentando click de activación...');
-        await page.mouse.click(640, 360);
-        await new Promise(r => setTimeout(r, 5000));
+    // Esperar al enlace o timeout corto (10-12s total)
+    try {
+        await Promise.race([
+            videoPromise,
+            new Promise((_, reject) => setTimeout(() => {
+                if (videoUrl) resolveVideo(videoUrl);
+                else reject(new Error('Timeout esperando video'));
+            }, 12000))
+        ]);
+    } catch (e) {
+        // Si falló el race pero no hay videoUrl, intentar click rápido
+        if (!videoUrl) {
+            console.log('[Puppeteer] Intentando click de activación rápido...');
+            await page.mouse.click(640, 360).catch(() => {});
+            await new Promise(r => setTimeout(r, 4000));
+        }
     }
 
     if (videoUrl) {

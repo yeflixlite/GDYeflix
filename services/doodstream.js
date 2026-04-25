@@ -1,106 +1,93 @@
 /**
  * ============================================================
  *  services/doodstream.js
- *  Extrae el enlace de descarga real de Doodstream
+ *  Extrae el enlace de video real de Doodstream usando Puppeteer.
+ *  Doodstream bloquea todas las peticiones HTTP directas (403),
+ *  por lo que se intercepta la petición de video desde el navegador.
  * ============================================================
- *
- *  Doodstream genera un token anti-hotlink. El flujo es:
- *  1. GET /e/<id>   → obtener la cookie 'pass_md5' y el token
- *  2. GET /pass_md5/<token>  → recibe la URL base del MP4
- *  3. URL final = urlBase + randomToken + "?token=..." + timestamp
  */
 
 'use strict';
 
-const cheerio          = require('cheerio');
-const { fetchWithRetry } = require('../utils/axiosClient');
+const puppeteer = require('puppeteer');
 
-const DOOD_DOMAINS = [
-  'https://dood.re',
-  'https://dood.so',
-  'https://dood.watch',
-  'https://dood.to',
-  'https://dood.la',
-  'https://ds2play.com',
-];
-
-/**
- * Convierte cualquier URL de Doodstream a la forma /e/<id>
- */
+/** Convierte cualquier URL de Doodstream a la forma /e/<id> */
 function normalizeUrl(url) {
   const u = new URL(url);
   const match = u.pathname.match(/\/(d|e|f|v)\/([a-zA-Z0-9]+)/);
   if (!match) throw new Error('ID de Doodstream no encontrado en la URL.');
   const id = match[2];
-  return `${u.origin}/e/${id}`;
+
+  // Intentar en dood.re (más estable), si la URL original es doodstream.com
+  const host = u.hostname.includes('doodstream.com') ? 'dood.re' : u.hostname;
+  return `https://${host}/e/${id}`;
 }
 
-/**
- * Genera 10 caracteres aleatorios (simulación del token del cliente)
- */
-function randomToken(length = 10) {
+function randomStr(length = 10) {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-  return Array.from({ length }, () =>
-    chars[Math.floor(Math.random() * chars.length)]
-  ).join('');
+  return Array.from({ length }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
 }
 
-/**
- * Extrae el enlace de video real de Doodstream.
- * @param {string} url – URL de cualquier página de Doodstream
- * @returns {Promise<{videoUrl: string, type: 'mp4'}>}
- */
 async function extract(url) {
   const embedUrl = normalizeUrl(url);
-  const origin   = new URL(embedUrl).origin;
+  console.log(`[Doodstream] 🚀 Usando Puppeteer para: ${embedUrl}`);
 
-  console.log(`[Doodstream] Accediendo a embed: ${embedUrl}`);
-
-  // ── PASO 1: GET la página embed ──────────────────────────────
-  const pageRes = await fetchWithRetry(embedUrl, {
-    referer: 'https://www.google.com/',
-    origin,
+  const browser = await puppeteer.launch({
+    headless: 'new',
+    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu'],
+    defaultViewport: { width: 1280, height: 720 },
   });
 
-  if (pageRes.status !== 200) {
-    throw new Error(`Doodstream respondió con status ${pageRes.status}`);
+  try {
+    const page = await browser.newPage();
+    await page.setUserAgent(
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+    );
+
+    // Interceptar la URL pass_md5 que Doodstream genera con JS
+    // Cerramos el navegador inmediatamente al capturarlo para ganar velocidad
+    const passMd5Promise = new Promise((resolve) => {
+      page.on('request', req => {
+        const u = req.url();
+        if (u.includes('/pass_md5/')) {
+          console.log(`[Doodstream] ✅ pass_md5 interceptado: ${u.substring(0, 60)}...`);
+          resolve(u);
+        }
+      });
+    });
+
+    // Navegación rápida: no esperamos a que cargue todo (networkidle), solo lo mínimo
+    await page.goto(embedUrl, { waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => {});
+
+    // Esperar al token con un timeout corto
+    const passMd5Url = await Promise.race([
+      passMd5Promise,
+      new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout esperando pass_md5')), 12000))
+    ]);
+
+    if (!passMd5Url) throw new Error('No se pudo interceptar la URL pass_md5 de Doodstream.');
+
+    // Navegar a pass_md5 DENTRO del mismo navegador (con las cookies de Cloudflare ya establecidas)
+    console.log('[Doodstream] Navegando a pass_md5 en el mismo contexto...');
+    const baseUrl = await page.evaluate(async (url) => {
+      const res = await fetch(url);
+      return await res.text();
+    }, passMd5Url).catch(() => null);
+
+    if (!baseUrl || !baseUrl.trim().startsWith('http')) {
+      throw new Error('Doodstream no devolvió una URL base válida desde pass_md5.');
+    }
+
+    const tokenPart = passMd5Url.split('/').pop();
+    const finalUrl = `${baseUrl.trim()}${randomStr(10)}?token=${tokenPart}&expiry=${Date.now()}`;
+
+    console.log(`[Doodstream] 🎬 URL final: ${finalUrl.substring(0, 80)}...`);
+    return { videoUrl: finalUrl, type: 'mp4', referer: embedUrl };
+
+  } finally {
+    await browser.close();
   }
-
-  const html = pageRes.data;
-
-  // ── PASO 2: Extraer pass_md5 y token ────────────────────────
-  // Patrón encontrado en el JS interno del embed
-  const passMd5Match = html.match(/pass_md5['":\s]+['"]([^'"]+)['"]/);
-  const tokenMatch   = html.match(/\?token=([a-zA-Z0-9]+)&expiry=/);
-
-  if (!passMd5Match) throw new Error('No se encontró pass_md5 en Doodstream.');
-
-  const passMd5Path = passMd5Match[1]; // ej: /pass_md5/abc123xyz
-  const token       = tokenMatch ? tokenMatch[1] : '';
-
-  const passMd5Url  = `${origin}${passMd5Path}`;
-
-  console.log(`[Doodstream] Obteniendo URL base: ${passMd5Url}`);
-
-  // ── PASO 3: GET la URL base del MP4 ─────────────────────────
-  const md5Res = await fetchWithRetry(passMd5Url, {
-    referer: embedUrl,
-    origin,
-  });
-
-  const baseUrl = md5Res.data.trim(); // Texto plano con la URL base
-
-  if (!baseUrl || !baseUrl.startsWith('http')) {
-    throw new Error('Doodstream no devolvió una URL base válida.');
-  }
-
-  // ── PASO 4: Construir la URL final ───────────────────────────
-  const expiry    = Date.now();
-  const videoUrl  = `${baseUrl}${randomToken(10)}?token=${token}&expiry=${expiry}`;
-
-  console.log(`[Doodstream] ✔ URL obtenida: ${videoUrl.substring(0, 80)}...`);
-
-  return { videoUrl, type: 'mp4', referer: origin };
 }
 
 module.exports = { extract };
+

@@ -10,6 +10,7 @@
 const PROVIDERS = {
   doodstream: [
     /dood\.(re|so|watch|to|la|pm|sh|ws|one|stream|video|cx|li|wf)/i,
+    /doodstream\.com/i,
     /ds2play\.com/i,
     /dooood\.com/i,
   ],
