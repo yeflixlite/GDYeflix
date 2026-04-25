@@ -79,19 +79,13 @@ async function extractWithPuppeteer(embedUrl, timeoutMs = 60_000) {
         timeout: 30000
     }).catch(() => {});
 
-    let isClosed = false;
-
-    // Función para intentar clicks en Cloudflare/Play mientras esperamos
-    const cloudflareClicker = async () => {
-        for (let i = 0; i < 6; i++) {
-            await new Promise(r => setTimeout(r, 4000));
-            if (videoUrl || isClosed) break;
-            try {
-                if (!isClosed) await page.mouse.click(640, 360).catch(()=>{});
-            } catch(e) {}
-        }
-    };
-    cloudflareClicker(); // Ejecutar en paralelo sin await
+    // Función para intentar clicks en Cloudflare/Play (se ejecuta en el navegador, 100% seguro)
+    await page.evaluate(() => {
+        window.cfClicker = setInterval(() => {
+            const el = document.elementFromPoint(window.innerWidth / 2, window.innerHeight / 2);
+            if (el) el.click();
+        }, 3000);
+    }).catch(() => {});
 
     // Esperar al enlace con un timeout generoso para Cloudflare (25s)
     try {
