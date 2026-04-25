@@ -8,7 +8,11 @@
 
 'use strict';
 
-const puppeteer = require('puppeteer');
+const puppeteer = require('puppeteer-extra');
+const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+
+// Añadir el plugin stealth para evadir protecciones antibot
+puppeteer.use(StealthPlugin());
 
 /**
  * Lanza Puppeteer y monitorea las peticiones de red.

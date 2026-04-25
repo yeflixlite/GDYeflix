@@ -9,7 +9,11 @@
 
 'use strict';
 
-const puppeteer = require('puppeteer');
+const puppeteer = require('puppeteer-extra');
+const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+
+// Añadir el plugin stealth para evadir protecciones antibot de Cloudflare en Render
+puppeteer.use(StealthPlugin());
 
 /** Convierte cualquier URL de Doodstream a la forma /e/<id> */
 function normalizeUrl(url) {
