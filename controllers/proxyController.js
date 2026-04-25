@@ -89,19 +89,31 @@ function rewriteM3u8(content, originalUrl, proxyBase, referer) {
     /#EXT-X-STREAM-INF:([^\r\n]+)/g,
     (match, attributes) => {
       let newAttributes = attributes;
+
+      // 1. Leer la resolución REAL del atributo antes de tocarlo (ej: RESOLUTION=1280x720)
       let res = '1280x720';
       let name = '"720p"';
+      const resMatch = attributes.match(/RESOLUTION=(\d+)x(\d+)/i);
+      if (resMatch) {
+        const height = parseInt(resMatch[2]);
+        res = `${resMatch[1]}x${resMatch[2]}`;
+        if (height >= 2160)      name = '"4K"';
+        else if (height >= 1080) name = '"1080p"';
+        else if (height >= 720)  name = '"720p"';
+        else if (height >= 480)  name = '"480p"';
+        else if (height >= 360)  name = '"360p"';
+        else                     name = `"${height}p"`;
+      } else {
+        // Fallback: inferir desde texto si no hay RESOLUTION= numérico
+        if (attributes.includes('1080p') || attributes.includes('1920x1080'))      { res = '1920x1080'; name = '"1080p"'; }
+        else if (attributes.includes('480p') || attributes.includes('854x480'))    { res = '854x480';   name = '"480p"'; }
+        else if (attributes.includes('360p') || attributes.includes('640x360'))    { res = '640x360';   name = '"360p"'; }
+        else if (attributes.includes('4K')   || attributes.includes('2160p'))      { res = '3840x2160'; name = '"4K"'; }
+      }
 
-      if (attributes.includes('1080p') || attributes.includes('1920x1080')) { res = '1920x1080'; name = '"1080p"'; }
-      else if (attributes.includes('480p') || attributes.includes('854x480')) { res = '854x480'; name = '"480p"'; }
-      else if (attributes.includes('360p') || attributes.includes('640x360')) { res = '640x360'; name = '"360p"'; }
-      else if (attributes.includes('4K') || attributes.includes('2160p')) { res = '3840x2160'; name = '"4K"'; }
-
-      // Limpiar etiquetas rotas (ej: RESOLUTION=0x0)
-      newAttributes = newAttributes.replace(/,RESOLUTION=[^,]+/g, '');
-      newAttributes = newAttributes.replace(/,NAME=[^,]+/g, '');
-
-      // Inyectar etiquetas limpias
+      // 2. Limpiar etiquetas existentes (rotas o correctas) y reinsertar limpias
+      newAttributes = newAttributes.replace(/,?RESOLUTION=[^\s,]+/gi, '');
+      newAttributes = newAttributes.replace(/,?NAME=[^\s,]+/gi, '');
       newAttributes += `,RESOLUTION=${res},NAME=${name}`;
 
       return `#EXT-X-STREAM-INF:${newAttributes}`;
