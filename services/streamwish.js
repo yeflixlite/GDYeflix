@@ -148,46 +148,21 @@ async function extract(url) {
 
   // DETECCIÓN DE LOADING SHELL (SPA)
   if (html.length < 2000 && (html.includes('Page is loading') || html.includes('Redirecting'))) {
-    console.log(`[StreamWish/${host}] ⏳ Detectada shell de carga en ${host}. Probando espejos rápidos...`);
+    console.log(`[StreamWish/${host}] ⏳ Detectada shell de carga. Saltando espejos inestables, intentando bypass de cookies rápido...`);
     
-    const id = u.pathname.split('/').filter(Boolean).pop();
-    const mirrors = ['wishembed.net', 'hglamioz.com', 'embedwish.com', 'awish.pro'];
-    
-    for (const mirror of mirrors) {
-      if (mirror === host) continue;
-      try {
-        const mirrorUrl = `https://${mirror}/e/${id}${u.search}`;
-        const mRes = await fetchWithRetry(mirrorUrl, { 
-            referer: 'https://google.com/', 
-            timeout: 3000 // Intentos rápidos
-        }, 1); // ¡SOLO 1 INTENTO PARA EVITAR RETRASOS!
-        
-        if (mRes.data.includes('Just a moment...') || mRes.data.includes('cf-browser-verification')) {
-            console.log(`[StreamWish] 🛡️ Cloudflare en mirror ${mirror}. Abortando mirrors.`);
-            throw new Error('CLOUDFLARE_DETECTED'); // Lanza un error específico
+    const cookies = response.headers['set-cookie'];
+    if (cookies) {
+        try {
+            response = await fetchWithRetry(embedUrl, {
+                referer: embedUrl,
+                origin,
+                headers: { Cookie: cookies.join('; ') },
+                timeout: 5000 // Timeout muy rápido
+            }, 1);
+            html = response.data;
+        } catch (e) {
+            // Ignorar y seguir al fallback de Puppeteer
         }
-        if (mRes.data.length > 5000 && !mRes.data.includes('Page is loading')) {
-          html = mRes.data;
-          console.log(`[StreamWish] ✅ Éxito con espejo rápido: ${mirror}`);
-          break;
-        }
-      } catch (e) {
-          if (e.message === 'CLOUDFLARE_DETECTED') {
-              throw new Error('Cloudflare detectado en espejos. Requiere Puppeteer.');
-          }
-          // Si es timeout, ignora y prueba el siguiente espejo
-      }
-    }
-
-    // Si aún es shell, intentar el bypass de cookies original
-    if (html.length < 2000 && html.includes('Page is loading')) {
-        const cookies = response.headers['set-cookie'];
-        response = await fetchWithRetry(embedUrl, {
-            referer: embedUrl,
-            origin,
-            headers: { 'Cookie': cookies ? cookies.join('; ') : '' }
-        });
-        html = response.data;
     }
   }
 
