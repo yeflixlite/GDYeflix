@@ -79,6 +79,12 @@ async function playHandler(req, res, next) {
         result = await service.extract(decodedUrl);
         method = 'http';
       } catch (err) {
+        // Si el servicio ya usa Puppeteer por dentro y falló, no tiene sentido usar el genérico 
+        // (y así evitamos lanzar 2 navegadores seguidos y quedarnos sin memoria RAM en Render)
+        if (provider === 'doodstream') {
+            throw new Error(`Fallo en la extracción dedicada: ${err.message}`);
+        }
+
         console.warn(`[Play] HTTP falló para ${provider}, intentando Puppeteer como fallback...`);
         try {
           result = await puppeteerExtractor.extract(decodedUrl);
