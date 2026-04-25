@@ -63,6 +63,20 @@ async function extract(url) {
     // Navegación rápida: no esperamos a que cargue todo (networkidle), solo lo mínimo
     await page.goto(embedUrl, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
 
+    // Función para intentar clicks en Cloudflare mientras esperamos
+    const cloudflareClicker = async () => {
+        for (let i = 0; i < 5; i++) {
+            await new Promise(r => setTimeout(r, 4000));
+            if (passMd5Url) break;
+            try {
+                // Click en el centro de la pantalla donde suele estar el checkbox de Cloudflare
+                await page.mouse.click(640, 360);
+                await page.mouse.click(200, 200); // Click alternativo
+            } catch(e) {}
+        }
+    };
+    cloudflareClicker(); // Ejecutar en paralelo sin await
+
     // Esperar al token con un timeout más generoso (25s) por si Cloudflare tarda
     const passMd5Url = await Promise.race([
       passMd5Promise,

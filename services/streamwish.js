@@ -134,6 +134,12 @@ async function extract(url) {
 
   let html = response.data;
 
+  // DETECCIÓN DE CLOUDFLARE EN RENDER
+  if (html.includes('Just a moment...') || html.includes('cf-browser-verification') || html.includes('challenge-platform')) {
+      console.log(`[StreamWish/${host}] 🛡️ Cloudflare detectado. Saltando mirrors HTTP y usando Puppeteer directamente.`);
+      throw new Error('Cloudflare detectado. Requiere Puppeteer.');
+  }
+
   // DETECCIÓN DE LOADING SHELL (SPA)
   if (html.length < 2000 && (html.includes('Page is loading') || html.includes('Redirecting'))) {
     console.log(`[StreamWish/${host}] ⏳ Detectada shell de carga en ${host}. Probando espejos rápidos...`);
@@ -147,8 +153,12 @@ async function extract(url) {
         const mirrorUrl = `https://${mirror}/e/${id}${u.search}`;
         const mRes = await fetchWithRetry(mirrorUrl, { 
             referer: 'https://google.com/', 
-            timeout: 5000 // Intentos muy rápidos
+            timeout: 3000 // Intentos aún más rápidos
         });
+        
+        if (mRes.data.includes('Just a moment...') || mRes.data.includes('cf-browser-verification')) {
+            throw new Error('Cloudflare en mirror');
+        }
         if (mRes.data.length > 5000 && !mRes.data.includes('Page is loading')) {
           html = mRes.data;
           console.log(`[StreamWish] ✅ Éxito con espejo rápido: ${mirror}`);
