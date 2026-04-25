@@ -64,16 +64,17 @@ async function extract(url) {
       });
     });
 
-    // Navegación rápida: no esperamos a que cargue todo (networkidle), solo lo mínimo
-    await page.goto(embedUrl, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
-
-    // Función para intentar clicks en Cloudflare (se ejecuta en el navegador, 100% seguro contra crashes)
-    await page.evaluate(() => {
+    // Función para intentar clicks en Cloudflare (se ejecuta en cada nuevo documento, 100% seguro)
+    await page.evaluateOnNewDocument(() => {
         window.cfClicker = setInterval(() => {
             const el = document.elementFromPoint(window.innerWidth / 2, window.innerHeight / 2);
             if (el) el.click();
         }, 3000);
     }).catch(() => {});
+
+    // Navegación SIN await: no esperamos a que cargue todo, solo lanzamos la petición
+    // Esto evita bloqueos de 30s si Cloudflare nunca dispara el evento 'domcontentloaded'
+    page.goto(embedUrl, { waitUntil: 'domcontentloaded', timeout: 25000 }).catch(() => {});
 
     // Esperar al token con un timeout más generoso (25s) por si Cloudflare tarda
     const passMd5Url = await Promise.race([

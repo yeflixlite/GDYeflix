@@ -71,20 +71,20 @@ async function extractWithPuppeteer(embedUrl, timeoutMs = 60_000) {
     page.on('request', (request) => updateVideoUrl(request.url()));
     page.on('response', (response) => updateVideoUrl(response.url()));
 
-    console.log(`[Puppeteer] 🌐 Navegando a: ${embedUrl}`);
-    
-    // Cargar la página rápidamente
-    await page.goto(embedUrl, {
-        waitUntil: 'domcontentloaded',
-        timeout: 30000
-    }).catch(() => {});
-
-    // Función para intentar clicks en Cloudflare/Play (se ejecuta en el navegador, 100% seguro)
-    await page.evaluate(() => {
+    // Inyectar el clicker interactivo automáticamente en cuanto cargue cualquier documento (evita bloqueos)
+    await page.evaluateOnNewDocument(() => {
         window.cfClicker = setInterval(() => {
             const el = document.elementFromPoint(window.innerWidth / 2, window.innerHeight / 2);
             if (el) el.click();
         }, 3000);
+    }).catch(() => {});
+
+    console.log(`[Puppeteer] 🌐 Navegando a: ${embedUrl}`);
+    
+    // Cargar la página SIN await para no bloquearnos 30 segundos si Cloudflare traba el 'domcontentloaded'
+    page.goto(embedUrl, {
+        waitUntil: 'domcontentloaded',
+        timeout: 25000
     }).catch(() => {});
 
     // Esperar al enlace con un timeout generoso para Cloudflare (25s)
