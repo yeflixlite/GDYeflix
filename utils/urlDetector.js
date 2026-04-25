@@ -33,8 +33,6 @@ const PROVIDERS = {
     /moviesapi\.club/i,
     /hglamioz\.com/i,
     /streamhg\.com/i,
-  ],
-  hgcloud: [
     /hgcloud\.(to|net|cc|me)/i,
   ],
   vidhide: [

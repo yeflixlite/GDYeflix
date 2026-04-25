@@ -125,7 +125,8 @@ async function extract(url) {
 
   // OPTIMIZACIÓN EXTREMA: El espejo hglamioz.com no tiene Cloudflare agresivo.
   // Forzamos TODAS las peticiones de Streamwish a pasar por este espejo primero.
-  if (host !== 'hglamioz.com' && host !== 'embedwish.com') {
+  // Excepciones: hgcloud y embedwish suelen funcionar nativamente.
+  if (!host.includes('hgcloud') && host !== 'hglamioz.com' && host !== 'embedwish.com') {
       embedUrl = `https://hglamioz.com/e/${id}${u.search}`;
       u = new URL(embedUrl);
       host = u.host;
