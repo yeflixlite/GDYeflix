@@ -48,6 +48,9 @@ async function extract(url) {
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
     );
 
+    let isClosed = false;
+    let localPassMd5Url = null;
+
     // Interceptar la URL pass_md5 que Doodstream genera con JS
     // Cerramos el navegador inmediatamente al capturarlo para ganar velocidad
     const passMd5Promise = new Promise((resolve) => {
@@ -55,6 +58,7 @@ async function extract(url) {
         const u = req.url();
         if (u.includes('/pass_md5/')) {
           console.log(`[Doodstream] ✅ pass_md5 interceptado: ${u.substring(0, 60)}...`);
+          localPassMd5Url = u;
           resolve(u);
         }
       });
@@ -67,11 +71,10 @@ async function extract(url) {
     const cloudflareClicker = async () => {
         for (let i = 0; i < 5; i++) {
             await new Promise(r => setTimeout(r, 4000));
-            if (passMd5Url) break;
+            if (localPassMd5Url || isClosed) break;
             try {
-                // Click en el centro de la pantalla donde suele estar el checkbox de Cloudflare
-                await page.mouse.click(640, 360);
-                await page.mouse.click(200, 200); // Click alternativo
+                if (!isClosed) await page.mouse.click(640, 360).catch(()=>{});
+                if (!isClosed) await page.mouse.click(200, 200).catch(()=>{}); // Click alternativo
             } catch(e) {}
         }
     };
@@ -103,6 +106,7 @@ async function extract(url) {
     return { videoUrl: finalUrl, type: 'mp4', referer: embedUrl };
 
   } finally {
+    isClosed = true;
     await browser.close();
   }
 }
