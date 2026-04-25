@@ -126,11 +126,17 @@ async function extract(url) {
 
   console.log(`[StreamWish/${host}] 🔍 Accediendo a: ${embedUrl}`);
 
-  let response = await fetchWithRetry(embedUrl, {
-    referer : 'https://www.google.com/',
-    origin,
-    timeout: 15000 // Timeout corto para el primer intento
-  });
+  let response;
+  try {
+      response = await fetchWithRetry(embedUrl, {
+        referer : 'https://www.google.com/',
+        origin,
+        timeout: 4000 // 4s timeout para fallar RAPIDISIMO si Cloudflare dropea la conexión
+      }, 1); // 1 solo intento
+  } catch(e) {
+      console.log(`[StreamWish/${host}] 🛡️ Error HTTP/Timeout. Probable bloqueo de Cloudflare. Usando Puppeteer directamente.`);
+      throw new Error('Bloqueo HTTP detectado. Requiere Puppeteer.');
+  }
 
   let html = response.data;
 

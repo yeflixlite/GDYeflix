@@ -48,6 +48,7 @@ async function fetchWithRetry(url, options = {}, retries = 3) {
     try {
       const response = await client.get(url, {
         responseType: options.responseType || 'text',
+        timeout: options.timeout || 30_000, // Custom timeout
       });
       return response;
     } catch (err) {
