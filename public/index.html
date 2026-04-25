@@ -415,6 +415,7 @@
           updateHlsMenu();
           video.play().catch(() => {});
         });
+        hlsInstance.on(Hls.Events.AUDIO_TRACKS_UPDATED, updateAudioMenu);
       } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
         video.src = source;
         video.play();
@@ -454,21 +455,29 @@
     qSelect.onchange = () => (hlsInstance.currentLevel = parseInt(qSelect.value));
 
     // Audio
-    if (hlsInstance.audioTracks.length > 0) {
-      aGroup.style.display = 'flex';
-      aSelect.innerHTML = '';
-      hlsInstance.audioTracks.forEach((t, i) => {
-        const opt = document.createElement('option');
-        opt.value = i;
-        opt.textContent = t.name || t.lang || 'Track ' + i;
-        aSelect.appendChild(opt);
-      });
-      aSelect.onchange = () => (hlsInstance.audioTrack = parseInt(aSelect.value));
-    } else {
-      aGroup.style.display = 'none';
-    }
+    updateAudioMenu();
 
     menu.style.display = 'flex';
+  }
+
+  function updateAudioMenu() {
+    const aSelect = document.getElementById('audioSelect');
+    const aGroup = document.getElementById('audioGroup');
+
+    if (!hlsInstance || !hlsInstance.audioTracks || hlsInstance.audioTracks.length <= 1) {
+      aGroup.style.display = 'none';
+      return;
+    }
+
+    aGroup.style.display = 'flex';
+    aSelect.innerHTML = '';
+    hlsInstance.audioTracks.forEach((t, i) => {
+      const opt = document.createElement('option');
+      opt.value = i;
+      opt.textContent = t.name || t.lang || 'Track ' + i;
+      aSelect.appendChild(opt);
+    });
+    aSelect.onchange = () => (hlsInstance.audioTrack = parseInt(aSelect.value));
   }
 
   function resetPlayer() {

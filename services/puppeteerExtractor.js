@@ -42,25 +42,26 @@ async function extractWithPuppeteer(embedUrl, timeoutMs = 60_000) {
 
     let videoUrl = null;
 
-    // Escuchar peticiones de red
-    page.on('request', (request) => {
-        const url = request.url();
-        if (url.includes('.m3u8') || url.includes('.mp4') || url.includes('master.txt')) {
-            if (!url.includes('test-videos.co.uk') && !url.includes('googlevideo.com')) {
-                videoUrl = url;
+    // Helper para decidir si guardar la URL
+    const updateVideoUrl = (url) => {
+        if (url.includes('.m3u8') || url.includes('.mp4') || url.includes('master.txt') || url.includes('playlist.txt')) {
+            if (!url.includes('test-videos.co.uk') && !url.includes('googlevideo.com') && !url.includes('adserver')) {
+                // Si la nueva URL tiene la palabra 'master', la preferimos siempre
+                if (url.includes('master')) {
+                    videoUrl = url;
+                } 
+                // Si no teníamos nada, la guardamos
+                else if (!videoUrl) {
+                    videoUrl = url;
+                }
+                // (Si ya teníamos una URL con 'master', ignoramos las peticiones de index/segmentos)
             }
         }
-    });
+    };
 
-    // Escuchar respuestas
-    page.on('response', (response) => {
-        const url = response.url();
-        if (url.includes('.m3u8') || url.includes('.mp4') || url.includes('master.txt')) {
-             if (!url.includes('test-videos.co.uk') && !url.includes('googlevideo.com')) {
-                videoUrl = url;
-            }
-        }
-    });
+    // Escuchar peticiones de red
+    page.on('request', (request) => updateVideoUrl(request.url()));
+    page.on('response', (response) => updateVideoUrl(response.url()));
 
     console.log(`[Puppeteer] 🌐 Navegando a: ${embedUrl}`);
     

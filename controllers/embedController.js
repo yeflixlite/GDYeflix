@@ -37,41 +37,62 @@ async function embedHandler(req, res, next) {
         #container { position: relative; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
         video { width: 100%; height: 100%; outline: none; background: #000; }
         
-        /* Overlay de carga */
+        /* Overlay de carga estilo Netflix */
         #loader {
             position: absolute; inset: 0; z-index: 100;
-            background: #05060a; display: flex; flex-direction: column;
+            background: #000; display: flex; flex-direction: column;
             align-items: center; justify-content: center; color: #fff;
             transition: opacity 0.5s;
         }
-        .spinner {
-            width: 40px; height: 40px; border: 3px solid rgba(255,255,255,0.1);
-            border-top: 3px solid #6366f1; border-radius: 50%;
-            animation: spin 0.8s linear infinite; margin-bottom: 15px;
+        .logo-yeflix {
+            font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+            color: #E50914; /* Rojo Netflix */
+            font-size: 42px;
+            font-weight: 900;
+            letter-spacing: 2px;
+            margin-bottom: 30px;
+            text-transform: uppercase;
+            transform: scaleY(1.1); /* Efecto condensado estilo Netflix */
+        }
+        .netflix-spinner {
+            width: 60px; height: 60px;
+            border: 4px solid rgba(229, 9, 20, 0.2);
+            border-top: 4px solid #E50914;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
         }
         @keyframes spin { to { transform: rotate(360deg); } }
+        .wait-text {
+            color: #888;
+            font-size: 13px;
+            margin-top: 20px;
+            font-weight: 500;
+            letter-spacing: 0.5px;
+        }
         
         /* Menú de calidad flotante */
         #menu {
             position: absolute; top: 15px; right: 15px; z-index: 1000;
-            background: rgba(13, 15, 23, 0.85); backdrop-filter: blur(10px);
-            border: 1px solid rgba(255,255,255,0.1); border-radius: 10px;
+            background: rgba(0, 0, 0, 0.7); backdrop-filter: blur(10px);
+            border: 1px solid rgba(255,255,255,0.1); border-radius: 5px;
             padding: 8px; display: none; flex-direction: column; gap: 5px;
-            box-shadow: 0 8px 32px rgba(0,0,0,0.5);
         }
         select { 
-            background: #1a1d2d; color: #fff; border: none; 
-            border-radius: 5px; padding: 5px 10px; font-size: 12px; 
+            background: transparent; color: #fff; border: none; 
+            border-radius: 3px; padding: 5px; font-size: 13px; 
             cursor: pointer; outline: none; font-family: inherit;
+            font-weight: bold;
         }
-        .error-msg { color: #ef4444; font-size: 14px; text-align: center; padding: 20px; display: none; }
+        select option { background: #111; color: #fff; }
+        .error-msg { color: #E50914; font-size: 16px; text-align: center; padding: 20px; display: none; }
     </style>
 </head>
 <body>
     <div id="container">
         <div id="loader">
-            <div class="spinner"></div>
-            <div style="font-size: 13px; font-weight: 400; color: #94a3b8;">Sincronizando stream seguro...</div>
+            <div class="logo-yeflix">YEFLIX</div>
+            <div class="netflix-spinner"></div>
+            <div class="wait-text">Espere 10 a 20 segundos...</div>
         </div>
         
         <div id="menu">
@@ -123,6 +144,7 @@ async function embedHandler(req, res, next) {
                 hls.loadSource(url);
                 hls.attachMedia(video);
                 hls.on(Hls.Events.MANIFEST_PARSED, setupUI);
+                hls.on(Hls.Events.AUDIO_TRACKS_UPDATED, updateAudioUI);
             } else {
                 video.src = url;
             }
@@ -149,19 +171,25 @@ async function embedHandler(req, res, next) {
             });
             q.onchange = () => (hls.currentLevel = parseInt(q.value));
 
-            // Audios
-            if (hls.audioTracks.length > 1) {
-                a.style.display = 'block';
-                hls.audioTracks.forEach((t, i) => {
-                    const opt = document.createElement('option');
-                    opt.value = i;
-                    opt.textContent = t.name || t.lang || 'Audio ' + i;
-                    a.appendChild(opt);
-                });
-                a.onchange = () => (hls.audioTrack = parseInt(a.value));
-            }
-
+            // Audios (a veces no están listos en MANIFEST_PARSED, por eso revisamos)
+            updateAudioUI();
+            
             menu.style.display = 'flex';
+        }
+
+        function updateAudioUI() {
+            const a = document.getElementById('audioSelect');
+            if (!hls || !hls.audioTracks || hls.audioTracks.length <= 1) return;
+            
+            a.style.display = 'block';
+            a.innerHTML = '';
+            hls.audioTracks.forEach((t, i) => {
+                const opt = document.createElement('option');
+                opt.value = i;
+                opt.textContent = t.name || t.lang || 'Audio ' + i;
+                a.appendChild(opt);
+            });
+            a.onchange = () => (hls.audioTrack = parseInt(a.value));
         }
 
         init();
