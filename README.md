@@ -12,18 +12,10 @@ Servidor proxy robusto desarrollado en Node.js para extraer y reproducir videos 
 ## 🔗 Cómo compartir videos
 Para compartir un video con tus compañeros, usa el siguiente formato de URL:
 
-`https://TU-DOMINIO.onrender.com/v?url=URL_DEL_VIDEO`
+`https://TU-DOMINIO.com/v?url=URL_DEL_VIDEO`
 
 **Ejemplo:**
-`https://TU-DOMINIO.onrender.com/v?url=https://hgcloud.to/e/yvapz6js5a01`
-
-## 🛠️ Instalación y Despliegue (Render.com)
-1. Conecta este repositorio a un **Web Service** en Render.
-2. Render detectará el `Dockerfile` automáticamente.
-3. Asegúrate de que el puerto sea el `3000`.
-
-## 🔋 Mantener 24/7 Gratis
-Como Render duerme los servicios gratuitos tras 15 min de inactividad, usa [Cron-job.org](https://cron-job.org) para hacer un "ping" a tu URL cada 10 minutos.
+`https://TU-DOMINIO.com/v?url=https://hgcloud.to/e/yvapz6js5a01`
 
 ---
 **Desarrollado para yeflix2025**
