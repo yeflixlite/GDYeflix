@@ -159,18 +159,24 @@ async function extract(url) {
         const mirrorUrl = `https://${mirror}/e/${id}${u.search}`;
         const mRes = await fetchWithRetry(mirrorUrl, { 
             referer: 'https://google.com/', 
-            timeout: 3000 // Intentos aún más rápidos
-        });
+            timeout: 3000 // Intentos rápidos
+        }, 1); // ¡SOLO 1 INTENTO PARA EVITAR RETRASOS!
         
         if (mRes.data.includes('Just a moment...') || mRes.data.includes('cf-browser-verification')) {
-            throw new Error('Cloudflare en mirror');
+            console.log(`[StreamWish] 🛡️ Cloudflare en mirror ${mirror}. Abortando mirrors.`);
+            throw new Error('CLOUDFLARE_DETECTED'); // Lanza un error específico
         }
         if (mRes.data.length > 5000 && !mRes.data.includes('Page is loading')) {
           html = mRes.data;
           console.log(`[StreamWish] ✅ Éxito con espejo rápido: ${mirror}`);
           break;
         }
-      } catch (e) {}
+      } catch (e) {
+          if (e.message === 'CLOUDFLARE_DETECTED') {
+              throw new Error('Cloudflare detectado en espejos. Requiere Puppeteer.');
+          }
+          // Si es timeout, ignora y prueba el siguiente espejo
+      }
     }
 
     // Si aún es shell, intentar el bypass de cookies original
