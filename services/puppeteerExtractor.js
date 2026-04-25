@@ -55,8 +55,9 @@ async function extractWithPuppeteer(embedUrl, timeoutMs = 60_000) {
                 } 
                 else if (!videoUrl) {
                     videoUrl = url;
-                    // No resolvemos aún, por si aparece un 'master' después, 
-                    // a menos que pase mucho tiempo
+                    // Resolver después de 1 segundo si no aparece un master
+                    // Así no esperamos los 12 segundos completos por gusto
+                    setTimeout(() => { if (videoUrl) resolveVideo(videoUrl); }, 1000);
                 }
             }
         }

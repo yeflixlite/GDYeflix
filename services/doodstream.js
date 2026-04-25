@@ -57,12 +57,12 @@ async function extract(url) {
     });
 
     // Navegación rápida: no esperamos a que cargue todo (networkidle), solo lo mínimo
-    await page.goto(embedUrl, { waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => {});
+    await page.goto(embedUrl, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
 
-    // Esperar al token con un timeout corto
+    // Esperar al token con un timeout más generoso (25s) por si Cloudflare tarda
     const passMd5Url = await Promise.race([
       passMd5Promise,
-      new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout esperando pass_md5')), 12000))
+      new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout esperando pass_md5')), 25000))
     ]);
 
     if (!passMd5Url) throw new Error('No se pudo interceptar la URL pass_md5 de Doodstream.');
