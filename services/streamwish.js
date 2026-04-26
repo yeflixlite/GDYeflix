@@ -82,18 +82,48 @@ function guessType(url) {
  * (patrón común en páginas que ofuscan con eval(atob(...)))
  */
 function tryDecodeEval(js) {
+  // 1. Intentar atob (existente)
   const atobMatch = js.match(/atob\(\s*['"]([A-Za-z0-9+/=]+)['"]\s*\)/g);
-  if (!atobMatch) return null;
-
-  for (const expr of atobMatch) {
-    try {
-      const b64 = expr.match(/['"]([A-Za-z0-9+/=]+)['"]/)[1];
-      const decoded = Buffer.from(b64, 'base64').toString('utf-8');
-      // Busca m3u8 / master.txt en el decoded
-      const urlMatch = decoded.match(/https?:\/\/[^\s"'<>]+(?:\.m3u8|master\.txt|playlist\.txt|\/hls\/)[^\s"'<>]*/i);
-      if (urlMatch) return urlMatch[0];
-    } catch { /* ignorar */ }
+  if (atobMatch) {
+    for (const expr of atobMatch) {
+      try {
+        const b64 = expr.match(/['"]([A-Za-z0-9+/=]+)['"]/)[1];
+        const decoded = Buffer.from(b64, 'base64').toString('utf-8');
+        const urlMatch = decoded.match(/https?:\/\/[^\s"'<>]+(?:\.m3u8|master\.txt|playlist\.txt|\/hls\/)[^\s"'<>]*/i);
+        if (urlMatch) return urlMatch[0];
+      } catch { /* ignorar */ }
+    }
   }
+
+  // 2. Intentar P.A.C.K.E.R (Dean Edwards)
+  // eval(function(p,a,c,k,e,d){...}('payload', base, count, 'dict'.split('|')))
+  const packerMatch = js.match(/eval\(function\(p,a,c,k,e,d\).*?\}\s*\(\s*['"](.*?)['"]\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*['"](.*?)['"]\.split\(['"]\|['"]\)/s);
+  
+  if (packerMatch) {
+    try {
+      let [_, p, a, c, k] = packerMatch;
+      a = parseInt(a);
+      c = parseInt(c);
+      k = k.split('|');
+      
+      const e = (c) => {
+        return (c < a ? '' : e(parseInt(c / a))) + ((c % a) > 35 ? String.fromCharCode((c % a) + 29) : (c % a).toString(36));
+      };
+
+      while (c--) {
+        if (k[c]) {
+          const regex = new RegExp('\\b' + e(c) + '\\b', 'g');
+          p = p.replace(regex, k[c]);
+        }
+      }
+      
+      const urlMatch = p.match(/https?:\/\/[^\s"'<>]+(?:\.m3u8|master\.txt|playlist\.txt|\/hls\/)[^\s"'<>]*/i);
+      if (urlMatch) return urlMatch[0];
+    } catch (err) {
+      console.log('[StreamWish] Error al desempaquetar Packer:', err.message);
+    }
+  }
+
   return null;
 }
 
