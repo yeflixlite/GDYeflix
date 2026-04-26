@@ -62,31 +62,67 @@ function decodeVoeConfig(encoded) {
  * @returns {Promise<{ videoUrl: string, type: 'm3u8'|'mp4', referer: string }>}
  */
 async function extract(url) {
-    const u = new URL(url);
-    const origin = u.origin;
-    const host = u.hostname;
-    const searchParams = u.search; // Guardar tokens ?t=...&s=...
+    let embedUrl = url;
+    let u = new URL(embedUrl);
+    const id = u.pathname.split('/').filter(Boolean).pop();
 
-    console.log(`[VOE/${host}] 🔍 Extrayendo (Estrategia Directa)...`);
+    // Espejos limpios de VOE
+    const CLEAN_MIRRORS = ['timmaybealready.com', 'charlestoughrace.com', 'reitshof.com'];
+    
+    // Lista de hosts a probar (el original primero, luego los espejos)
+    const hostsToTry = [u.host, ...CLEAN_MIRRORS];
+    const uniqueHosts = [...new Set(hostsToTry)];
 
-    let response = await fetchWithRetry(url, {
-        referer: 'https://google.com/',
-        origin
-    });
+    let html = '';
+    let finalOrigin = '';
+    let finalEmbedUrl = embedUrl;
 
-    let html = response.data;
+    console.log(`[VOE] 🔍 Iniciando búsqueda rápida por HTTP en espejos limpios...`);
 
-    // Manejo de Loading Shell (SPA)
-    if (html.length < 5000 && (html.includes('Page is loading') || html.includes('loading'))) {
-        console.log(`[VOE/${host}] ⏳ Detectada shell de carga, intentando bypass...`);
-        const cookies = response.headers['set-cookie'];
-        response = await fetchWithRetry(url, {
-            referer: url,
-            origin,
-            headers: { 'Cookie': cookies ? cookies.join('; ') : '' }
-        });
-        html = response.data;
+    for (const testHost of uniqueHosts) {
+        const testUrl = `https://${testHost}/e/${id}${u.search}`;
+        console.log(`[VOE] Probando espejo: ${testUrl}`);
+        try {
+            // Timeout rápido (4s)
+            const response = await fetchWithRetry(testUrl, {
+                referer: 'https://google.com/',
+                origin: `https://${testHost}`,
+                timeout: 4000
+            }, 1);
+
+            const testHtml = response.data;
+
+            // Verificamos si es una página real de video
+            if ((testHtml.includes('sources') || testHtml.includes('voe-video') || testHtml.includes('decodeVoeConfig') || testHtml.includes('application/json')) && !testHtml.includes('Just a moment...')) {
+                console.log(`[VOE] ✅ ¡ÉXITO HTTP! Espejo limpio: ${testHost}`);
+                html = testHtml;
+                finalOrigin = `https://${testHost}`;
+                finalEmbedUrl = testUrl;
+                break;
+            }
+        } catch (e) {
+            // Falló, seguimos
+        }
     }
+
+    if (!html) {
+        console.log(`[VOE] 🛡️ Todos los espejos fallaron. Intentando última petición al host original...`);
+        try {
+            const response = await fetchWithRetry(embedUrl, {
+                referer: 'https://google.com/',
+                origin: u.origin
+            });
+            html = response.data;
+            finalOrigin = u.origin;
+            finalEmbedUrl = embedUrl;
+        } catch (e) {
+            throw new Error(`Bloqueo total en VOE (${u.host}). Requiere Puppeteer.`);
+        }
+    }
+
+    const host = new URL(finalEmbedUrl).host;
+    const origin = finalOrigin;
+    const searchParams = new URL(finalEmbedUrl).search;
 
     let finalVideoUrl = null;
 

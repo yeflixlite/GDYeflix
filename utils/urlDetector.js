@@ -65,6 +65,7 @@ const PROVIDERS = {
     /reitshof\.com/i,
     /v-o-e\.com/i,
     /voe-video\.com/i,
+    /timmaybealready\.com/i,
   ],
   mp4upload: [
     /mp4upload\.com/i,
