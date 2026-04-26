@@ -13,6 +13,7 @@ const PROVIDERS = {
     /doodstream\.com/i,
     /ds2play\.com/i,
     /dooood\.com/i,
+    /playmogo\.com/i,
   ],
   streamtape: [
     /streamtape\.com/i,

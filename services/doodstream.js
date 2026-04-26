@@ -11,6 +11,7 @@
 
 const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+const { fetchWithRetry } = require('../utils/axiosClient');
 
 // Añadir el plugin stealth para evadir protecciones antibot de Cloudflare en Render
 puppeteer.use(StealthPlugin());
@@ -20,11 +21,7 @@ function normalizeUrl(url) {
   const u = new URL(url);
   const match = u.pathname.match(/\/(d|e|f|v)\/([a-zA-Z0-9]+)/);
   if (!match) throw new Error('ID de Doodstream no encontrado en la URL.');
-  const id = match[2];
-
-  // Intentar en dood.re (más estable), si la URL original es doodstream.com
-  const host = u.hostname.includes('doodstream.com') ? 'dood.re' : u.hostname;
-  return `https://${host}/e/${id}`;
+  return match[2];
 }
 
 function randomStr(length = 10) {
@@ -33,8 +30,55 @@ function randomStr(length = 10) {
 }
 
 async function extract(url) {
-  const embedUrl = normalizeUrl(url);
-  console.log(`[Doodstream] 🚀 Usando Puppeteer para: ${embedUrl}`);
+  const id = normalizeUrl(url);
+  const u = new URL(url);
+  
+  // Espejos limpios de Doodstream
+  const CLEAN_MIRRORS = ['playmogo.com', 'dood.re', 'doodstream.com'];
+  const hostsToTry = [u.host, ...CLEAN_MIRRORS];
+  const uniqueHosts = [...new Set(hostsToTry)];
+
+  console.log(`[Doodstream] 🔍 Probando extracción rápida por HTTP...`);
+
+  for (const host of uniqueHosts) {
+      const embedUrl = `https://${host}/e/${id}`;
+      try {
+          console.log(`[Doodstream] Probando espejo: ${embedUrl}`);
+          const response = await fetchWithRetry(embedUrl, {
+              referer: 'https://google.com/',
+              timeout: 4000
+          }, 1);
+
+          const html = response.data;
+
+          if (html.includes('/pass_md5/') && !html.includes('Just a moment...')) {
+              console.log(`[Doodstream] ✅ ¡ÉXITO HTTP! Espejo limpio encontrado: ${host}`);
+              
+              const passMatch = html.match(/\/pass_md5\/([^'"]+)/);
+              if (passMatch) {
+                  const passUrl = `https://${host}${passMatch[0]}`;
+                  const passRes = await fetchWithRetry(passUrl, {
+                      referer: embedUrl,
+                      timeout: 5000
+                  }, 1);
+
+                  const baseUrl = passRes.data;
+                  if (baseUrl && baseUrl.trim().startsWith('http')) {
+                      const tokenPart = passMatch[1].split('/').pop();
+                      const finalUrl = `${baseUrl.trim()}${randomStr(10)}?token=${tokenPart}&expiry=${Date.now()}`;
+                      console.log(`[Doodstream] 🎬 URL extraída vía HTTP: ${finalUrl.substring(0, 60)}...`);
+                      return { videoUrl: finalUrl, type: 'mp4', referer: embedUrl };
+                  }
+              }
+          }
+      } catch (e) {
+          // Seguir probando
+      }
+  }
+
+  // Fallback a Puppeteer si todo falla
+  const embedUrl = `https://${u.host.includes('doodstream.com') ? 'dood.re' : u.host}/e/${id}`;
+  console.log(`[Doodstream] 🛡️ HTTP falló o Cloudflare detectado. Usando Puppeteer: ${embedUrl}`);
 
   const browser = await puppeteer.launch({
     headless: 'new',

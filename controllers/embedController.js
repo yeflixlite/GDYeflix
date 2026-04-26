@@ -114,18 +114,22 @@ async function embedHandler(req, res, next) {
             const originalUrl = "${encodeURIComponent(url)}";
             
             try {
-                // Temporizador de 4 segundos para una experiencia consistente
                 const minWait = new Promise(resolve => setTimeout(resolve, 4000));
-
-                // Usamos el endpoint /play que ahora es robusto
-                const fetchPromise = fetch('/play?url=' + originalUrl).then(r => r.json());
-                
-                // Esperamos ambas
-                const [data] = await Promise.all([fetchPromise, minWait]);
+                const data = await fetch('/play?url=' + originalUrl).then(r => r.json());
                 
                 if (data.error) throw new Error(data.error);
                 
-                startStreaming(data.proxyUrl, data.type);
+                // Empezamos a cargar el video en segundo plano
+                startStreaming(data.proxyUrl, data.type, false);
+
+                // Esperamos los 4 segundos totales
+                await minWait;
+
+                // Mostramos el video
+                loader.style.opacity = '0';
+                setTimeout(() => loader.style.display = 'none', 500);
+                video.style.display = 'block';
+
             } catch (err) {
                 loader.style.display = 'none';
                 errorView.style.display = 'block';
@@ -133,9 +137,14 @@ async function embedHandler(req, res, next) {
             }
         }
 
-        function startStreaming(url, type) {
-            loader.style.opacity = '0';
-            setTimeout(() => loader.style.display = 'none', 500);
+        function startStreaming(url, type, showImmediately = true) {
+            if (showImmediately) {
+                loader.style.opacity = '0';
+                setTimeout(() => loader.style.display = 'none', 500);
+                video.style.display = 'block';
+            } else {
+                video.style.display = 'none';
+            }
 
             if (type === 'm3u8' && Hls.isSupported()) {
                 hls = new Hls({ 

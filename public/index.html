@@ -366,24 +366,25 @@
     updateStatus('busy', 'Analizando proveedor y extrayendo...');
 
     try {
-      // Creamos una promesa que se resuelve en 4 segundos exactos
       const minWait = new Promise(resolve => setTimeout(resolve, 4000));
       
-      // Ejecutamos la petición al servidor
-      const fetchPromise = fetch(`/play?url=${encodeURIComponent(url)}&mode=${currentMode}`)
-        .then(r => r.json());
-
-      // Esperamos a que AMBAS terminen (la petición y los 4 segundos)
-      const [data] = await Promise.all([fetchPromise, minWait]);
-
+      const data = await fetch(`/play?url=${encodeURIComponent(url)}&mode=${currentMode}`).then(r => r.json());
       if (data.error) throw new Error(data.error);
 
       addLog("¡Éxito! Enlace extraído via " + data.method, 'sc');
-      addLog("Provider: " + data.provider, 'hl');
+      
+      // PASO 1: Empezar a cargar el video en segundo plano
+      initPlayer(data.proxyUrl, data.type, false); // false = no mostrar todavía
+
+      // PASO 2: Esperar a que se cumplan los 4 segundos
+      await minWait;
+
+      // PASO 3: Mostrar el reproductor
+      document.getElementById('overlay').style.display = 'none';
+      document.getElementById('player').style.display = 'block';
       
       updateStatus('ok', 'Streaming listo');
       showStreamInfo(data);
-      initPlayer(data.proxyUrl, data.type);
 
     } catch (err) {
       addLog("Error: " + err.message, 'err');
@@ -394,11 +395,16 @@
     }
   }
 
-  function initPlayer(source, type) {
+  function initPlayer(source, type, showImmediately = true) {
     const video = document.getElementById('player');
     const overlay = document.getElementById('overlay');
-    overlay.style.display = 'none';
-    video.style.display = 'block';
+    
+    if (showImmediately) {
+      overlay.style.display = 'none';
+      video.style.display = 'block';
+    } else {
+      video.style.display = 'none'; // Aseguramos que esté oculto mientras carga
+    }
 
     if (type === 'm3u8') {
       if (Hls.isSupported()) {
@@ -409,7 +415,7 @@
           backBufferLength: 90,
           maxBufferLength: 60,
           maxMaxBufferLength: 120,
-          maxBufferSize: 60 * 1024 * 1024, // 60MB
+          maxBufferSize: 60 * 1024 * 1024,
           fragLoadingTimeOut: 20000,
           manifestLoadingTimeOut: 20000,
           levelLoadingTimeOut: 20000,
@@ -420,16 +426,20 @@
         hlsInstance.attachMedia(video);
         hlsInstance.on(Hls.Events.MANIFEST_PARSED, () => {
           updateHlsMenu();
-          video.play().catch(() => {});
+          if (showImmediately) video.play().catch(() => {});
+          else {
+              // Si estamos en segundo plano, intentamos auto-play pero silenciado para evitar bloqueos
+              video.play().catch(() => {});
+          }
         });
         hlsInstance.on(Hls.Events.AUDIO_TRACKS_UPDATED, updateAudioMenu);
       } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
         video.src = source;
-        video.play();
+        if (showImmediately) video.play();
       }
     } else {
       video.src = source;
-      video.play();
+      if (showImmediately) video.play();
     }
   }
 
