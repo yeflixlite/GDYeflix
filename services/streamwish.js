@@ -148,8 +148,8 @@ async function extract(url) {
 
           const testHtml = response.data;
 
-          // Verificamos si logramos obtener la página real del reproductor
-          if (testHtml.includes('setup({') && !testHtml.includes('Just a moment...') && !testHtml.includes('Page is loading')) {
+          // Verificamos si logramos obtener la página real del reproductor (ya sea en texto crudo o empaquetado con eval)
+          if ((testHtml.includes('setup({') || testHtml.includes('eval(function')) && !testHtml.includes('Just a moment...') && !testHtml.includes('Page is loading')) {
               console.log(`[StreamWish] ✅ ¡ÉXITO HTTP! Espejo limpio funcionó al instante: ${testHost}`);
               html = testHtml;
               finalOrigin = `https://${testHost}`;
