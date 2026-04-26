@@ -366,8 +366,15 @@
     updateStatus('busy', 'Analizando proveedor y extrayendo...');
 
     try {
-      const resp = await fetch(`/play?url=${encodeURIComponent(url)}&mode=${currentMode}`);
-      const data = await resp.json();
+      // Creamos una promesa que se resuelve en 4 segundos exactos
+      const minWait = new Promise(resolve => setTimeout(resolve, 4000));
+      
+      // Ejecutamos la petición al servidor
+      const fetchPromise = fetch(`/play?url=${encodeURIComponent(url)}&mode=${currentMode}`)
+        .then(r => r.json());
+
+      // Esperamos a que AMBAS terminen (la petición y los 4 segundos)
+      const [data] = await Promise.all([fetchPromise, minWait]);
 
       if (data.error) throw new Error(data.error);
 

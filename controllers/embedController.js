@@ -92,7 +92,7 @@ async function embedHandler(req, res, next) {
         <div id="loader">
             <div class="logo-yeflix">YEFLIX</div>
             <div class="netflix-spinner"></div>
-            <div class="wait-text">Espere 10 a 20 segundos...</div>
+            <div class="wait-text">Cargando video...</div>
         </div>
         
         <div id="menu">
@@ -114,9 +114,14 @@ async function embedHandler(req, res, next) {
             const originalUrl = "${encodeURIComponent(url)}";
             
             try {
+                // Temporizador de 4 segundos para una experiencia consistente
+                const minWait = new Promise(resolve => setTimeout(resolve, 4000));
+
                 // Usamos el endpoint /play que ahora es robusto
-                const res = await fetch('/play?url=' + originalUrl);
-                const data = await res.json();
+                const fetchPromise = fetch('/play?url=' + originalUrl).then(r => r.json());
+                
+                // Esperamos ambas
+                const [data] = await Promise.all([fetchPromise, minWait]);
                 
                 if (data.error) throw new Error(data.error);
                 
