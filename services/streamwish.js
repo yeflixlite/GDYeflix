@@ -120,66 +120,60 @@ function extractScripts(html) {
 async function extract(url) {
   let embedUrl = normalizeUrl(url);
   let u = new URL(embedUrl);
-  let host = u.host;
   const id = u.pathname.split('/').filter(Boolean).pop();
 
-  // OPTIMIZACIÓN EXTREMA: El espejo hglamioz.com no tiene Cloudflare agresivo.
-  // Forzamos TODAS las peticiones de Streamwish a pasar por este espejo primero.
-  // Excepciones: hgcloud y embedwish suelen funcionar nativamente.
-  if (!host.includes('hgcloud') && host !== 'hglamioz.com' && host !== 'embedwish.com') {
-      embedUrl = `https://hglamioz.com/e/${id}${u.search}`;
-      u = new URL(embedUrl);
-      host = u.host;
-      console.log(`[StreamWish] 🔄 Redirigiendo URL principal a espejo rápido: ${embedUrl}`);
+  // Espejos limpios sin Cloudflare agresivo proporcionados por el usuario
+  const CLEAN_MIRRORS = ['playnixes.com', 'hglamioz.com', 'medixiru.com'];
+  
+  // Agregamos el host original a la lista por si es nativo (ej. hgcloud.to o local)
+  const hostsToTry = [u.host, ...CLEAN_MIRRORS];
+  const uniqueHosts = [...new Set(hostsToTry)];
+
+  let html = '';
+  let finalOrigin = '';
+  let finalEmbedUrl = embedUrl;
+
+  console.log(`[StreamWish] 🔍 Iniciando búsqueda rápida por HTTP en espejos limpios...`);
+
+  for (const testHost of uniqueHosts) {
+      const testUrl = `https://${testHost}/e/${id}${u.search}`;
+      console.log(`[StreamWish] Probando espejo: ${testUrl}`);
+      try {
+          // Timeout ultra rápido (3.5s) para ignorar los que estén bloqueados por Cloudflare en Render
+          const response = await fetchWithRetry(testUrl, {
+              referer: 'https://www.google.com/',
+              origin: `https://${testHost}`,
+              timeout: 3500 
+          }, 1);
+
+          const testHtml = response.data;
+
+          // Verificamos si logramos obtener la página real del reproductor
+          if (testHtml.includes('setup({') && !testHtml.includes('Just a moment...') && !testHtml.includes('Page is loading')) {
+              console.log(`[StreamWish] ✅ ¡ÉXITO HTTP! Espejo limpio funcionó al instante: ${testHost}`);
+              html = testHtml;
+              finalOrigin = `https://${testHost}`;
+              finalEmbedUrl = testUrl;
+              break; // Tenemos el HTML bueno, salimos del ciclo
+          }
+      } catch (e) {
+          // Falló por bloqueo o timeout, probamos el siguiente espejo
+      }
   }
 
-  const origin   = `https://${host}`;
-  const search   = u.search;
-
-  console.log(`[StreamWish/${host}] 🔍 Accediendo a: ${embedUrl}`);
-
-  let response;
-  try {
-      response = await fetchWithRetry(embedUrl, {
-        referer : 'https://www.google.com/',
-        origin,
-        timeout: 4000 // 4s timeout para fallar RAPIDISIMO si Cloudflare dropea la conexión
-      }, 1); // 1 solo intento
-  } catch(e) {
-      console.log(`[StreamWish/${host}] 🛡️ Error HTTP/Timeout. Probable bloqueo de Cloudflare. Usando Puppeteer directamente.`);
-      throw new Error('Bloqueo HTTP detectado. Requiere Puppeteer.');
-  }
-
-  let html = response.data;
-
-  // DETECCIÓN DE CLOUDFLARE EN RENDER
-  if (html.includes('Just a moment...') || html.includes('cf-browser-verification') || html.includes('challenge-platform')) {
-      console.log(`[StreamWish/${host}] 🛡️ Cloudflare detectado. Saltando mirrors HTTP y usando Puppeteer directamente.`);
-      throw new Error('Cloudflare detectado. Requiere Puppeteer.');
-  }
-
-  // DETECCIÓN DE LOADING SHELL (SPA)
-  if (html.length < 2000 && (html.includes('Page is loading') || html.includes('Redirecting'))) {
-    console.log(`[StreamWish/${host}] ⏳ Detectada shell de carga. Saltando espejos inestables, intentando bypass de cookies rápido...`);
-    
-    const cookies = response.headers['set-cookie'];
-    if (cookies) {
-        try {
-            response = await fetchWithRetry(embedUrl, {
-                referer: embedUrl,
-                origin,
-                headers: { Cookie: cookies.join('; ') },
-                timeout: 5000 // Timeout muy rápido
-            }, 1);
-            html = response.data;
-        } catch (e) {
-            // Ignorar y seguir al fallback de Puppeteer
-        }
-    }
+  // Si después de iterar por todos los espejos limpios no tenemos HTML válido, abortamos.
+  if (!html) {
+      console.log(`[StreamWish] 🛡️ Todos los espejos limpios fallaron (o pidieron Cloudflare). Requiere Puppeteer.`);
+      throw new Error('Bloqueo Cloudflare total en espejos. Requiere Puppeteer.');
   }
 
   const scripts = extractScripts(html);
-  console.log(`[StreamWish/${host}] 📄 HTML obtenido (${html.length} bytes), analizando...`);
+  const hostToLog = new URL(finalEmbedUrl).host;
+  const host = hostToLog;
+  const origin = finalOrigin;
+  const search = u.search;
+  
+  console.log(`[StreamWish/${hostToLog}] 📄 HTML obtenido (${html.length} bytes), analizando...`);
 
   /* ── Estrategia 1: jwplayer setup  ─────────────────────── */
   // jwplayer("player").setup({sources:[{file:"..."}]})
@@ -188,11 +182,11 @@ async function extract(url) {
   );
   if (m && m[1].startsWith('http')) {
     let videoUrl = m[1];
-    if (search && !videoUrl.includes('t=')) {
-        videoUrl += (videoUrl.includes('?') ? '&' : '?') + search.substring(1);
+    if (u.search && !videoUrl.includes('t=')) {
+        videoUrl += (videoUrl.includes('?') ? '&' : '?') + u.search.substring(1);
     }
-    console.log(`[StreamWish/${host}] ✅ Estrategia 1 (jwplayer setup) → ${videoUrl.substring(0, 80)}`);
-    return { videoUrl, type: guessType(videoUrl), referer: origin };
+    console.log(`[StreamWish/${hostToLog}] ✅ Estrategia 1 (jwplayer setup) → ${videoUrl.substring(0, 80)}`);
+    return { videoUrl, type: guessType(videoUrl), referer: finalOrigin };
   }
 
   /* ── Estrategia 2: file: "..." o file: '...' ────────────── */
