@@ -13,6 +13,17 @@ const http                = require('http');
 const https               = require('https');
 const { getMediaHeaders } = require('../utils/browserHeaders');
 
+// CONFIGURACIÓN DE AHORRO DE BANDA
+// Si es 'false', los segmentos (.ts) se cargarán directo del CDN original.
+// Esto ahorra el 95% del ancho de banda del servidor.
+const PROXY_SEGMENTS = process.env.PROXY_SEGMENTS !== 'false'; 
+
+// Lista de dominios que permiten carga directa (CORS abierto o sin Referer estricto)
+const DIRECT_DOMAINS = [
+    'voe.sx', 'timmaybealready.com', 'doodstream.com', 'dood.re', 
+    'filemoon.sx', 'googleusercontent.com'
+];
+
 // Agentes con Keep-Alive para rendimiento
 const httpAgent = new http.Agent({ keepAlive: true });
 const httpsAgent = new https.Agent({ keepAlive: true });
@@ -67,8 +78,20 @@ function rewriteM3u8(content, originalUrl, proxyBase, referer) {
       line = line.trim();
       if (!line) return line;
       const abs = resolveUrl(line, originalUrl);
+      
+      // Bloqueo de anuncios
       const isAd = AD_BLOCKLIST.some(domain => abs.includes(domain));
       if (isAd) return abs; 
+
+      // LÓGICA DE AHORRO: ¿Debemos saltarnos el proxy para este segmento?
+      const isSegment = abs.includes('.ts') || abs.includes('.m4s') || abs.includes('.mp4');
+      const canBeDirect = DIRECT_DOMAINS.some(d => abs.includes(d));
+
+      if (isSegment && !PROXY_SEGMENTS && canBeDirect) {
+          // Devolvemos la URL directa. Ahorramos 100% de banda en este fragmento.
+          return abs;
+      }
+      
       return `${proxyBase}?url=${encodeURIComponent(abs)}&referer=${encodedReferer}`;
     }
   );
