@@ -1,3 +1,12 @@
+---
+title: Yeflix Proxy
+emoji: 📺
+colorFrom: red
+colorTo: black
+sdk: docker
+pinned: false
+---
+
 # 🌐 Video Streaming Proxy (HGCloud & StreamWish)
 
 Servidor proxy robusto desarrollado en Node.js para extraer y reproducir videos de proveedores protegidos (HGCloud, StreamWish, Doodstream, etc.) sin restricciones de CORS y con soporte para múltiples idiomas y calidades.
