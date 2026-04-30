@@ -67,6 +67,9 @@ const PROVIDERS = {
     /v-o-e\.com/i,
     /voe-video\.com/i,
     /timmaybealready\.com/i,
+    /richardquestionbuilding\.com/i,
+    /jenniferperformer\.com/i,
+    /p-v-o-e\.com/i,
   ],
   mp4upload: [
     /mp4upload\.com/i,

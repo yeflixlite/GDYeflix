@@ -10,37 +10,31 @@
 'use strict';
 
 const { detectProvider }   = require('../utils/urlDetector');
-const doodstream           = require('../services/doodstream');
-const streamtape           = require('../services/streamtape');
-const streamwish           = require('../services/streamwish');
-const filemoon             = require('../services/filemoon');
-const voe                  = require('../services/voe');
-const dailymotion          = require('../services/dailymotion');
-const earvids              = require('../services/earvids');
-const vidhide              = require('../services/vidhide');
-const generic              = require('../services/generic');
-const puppeteerExtractor   = require('../services/puppeteerExtractor');
+
+/** Mapa proveedor → servicio HTTP (Lazy loaded inside handler) */
+let HTTP_SERVICE_MAP = null;
+
+function getServiceMap() {
+  if (HTTP_SERVICE_MAP) return HTTP_SERVICE_MAP;
+  
+  // Lazy require to avoid crashes on Vercel/Serverless
+  HTTP_SERVICE_MAP = {
+    doodstream  : require('../services/doodstream'),
+    streamtape  : require('../services/streamtape'),
+    streamwish  : require('../services/streamwish'),
+    hgcloud     : require('../services/streamwish'),
+    vidhide     : require('../services/vidhide'),
+    filemoon    : require('../services/filemoon'),
+    voe         : require('../services/voe'),
+    dailymotion : require('../services/dailymotion'),
+    earvids     : require('../services/earvids'),
+    direct      : require('../services/generic'),
+    unknown     : require('../services/generic'),
+  };
+  return HTTP_SERVICE_MAP;
+}
 
 /** Mapa proveedor → servicio HTTP */
-const HTTP_SERVICE_MAP = {
-  doodstream,
-  streamtape,
-  streamwish,
-  hgcloud  : streamwish,
-  vidhide,
-  filemoon,
-  voe,
-  dailymotion,
-  earvids,
-  direct   : generic,
-  unknown  : generic,
-};
-
-/** Proveedores que intentamos primero con Puppeteer por ser SPAs agresivos */
-/**
- * GET /play?url=<encoded-url>
- * Responde con JSON: { videoUrl, proxyUrl, type, provider }
- */
 async function playHandler(req, res, next) {
   try {
     const { url, mode = 'auto' } = req.query;
@@ -57,6 +51,7 @@ async function playHandler(req, res, next) {
       return res.status(400).json({ error: 'La URL proporcionada no es válida.' });
     }
 
+    const serviceMap = getServiceMap();
     const provider = detectProvider(decodedUrl);
 
     console.log(`\n[Play] Proveedor detectado: ${provider} → ${decodedUrl}`);
@@ -66,30 +61,35 @@ async function playHandler(req, res, next) {
 
     // Lógica de extracción optimizada para VELOCIDAD
     if (mode === 'puppeteer') {
+      const puppeteerExtractor = require('../services/puppeteerExtractor');
       result = await puppeteerExtractor.extract(decodedUrl);
       method = 'puppeteer';
     } else if (mode === 'http') {
-      const service = HTTP_SERVICE_MAP[provider] || generic;
+      const service = serviceMap[provider] || require('../services/generic');
       result = await service.extract(decodedUrl);
       method = 'http';
     } else {
       // MODO AUTO: Siempre intenta HTTP primero (1s) antes de ir a Puppeteer (15s)
       try {
-        const service = HTTP_SERVICE_MAP[provider] || generic;
+        const service = serviceMap[provider] || require('../services/generic');
         result = await service.extract(decodedUrl);
         method = 'http';
       } catch (err) {
         // Si el servicio ya usa Puppeteer por dentro y falló, no tiene sentido usar el genérico 
-        // (y así evitamos lanzar 2 navegadores seguidos y quedarnos sin memoria RAM en Render)
         if (provider === 'doodstream') {
             throw new Error(`Fallo en la extracción dedicada: ${err.message}`);
         }
 
         console.warn(`[Play] HTTP falló para ${provider}, intentando Puppeteer como fallback...`);
         try {
+          const puppeteerExtractor = require('../services/puppeteerExtractor');
           result = await puppeteerExtractor.extract(decodedUrl);
           method = 'puppeteer';
         } catch (puppErr) {
+          // Si falla el require de puppeteer (en Vercel por ejemplo)
+          if (puppErr.message.includes('Cannot find module')) {
+             throw new Error(`Fallo en HTTP: ${err.message}. Puppeteer no está disponible en este servidor.`);
+          }
           throw new Error(`Fallo total. HTTP: ${err.message}. Puppeteer: ${puppErr.message}`);
         }
       }

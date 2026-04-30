@@ -15,7 +15,9 @@ const VOE_DOMAINS = [
     'charlestoughrace.com',
     'reitshof.com',
     'v-o-e.com',
-    'voe-video.com'
+    'voe-video.com',
+    'richardquestionbuilding.com',
+    'jenniferperformer.com'
 ];
 
 /**
@@ -66,58 +68,63 @@ async function extract(url) {
     let u = new URL(embedUrl);
     const id = u.pathname.split('/').filter(Boolean).pop();
 
-    // Espejos limpios de VOE
-    const CLEAN_MIRRORS = ['timmaybealready.com', 'charlestoughrace.com', 'reitshof.com'];
+    // Espejos limpios de VOE y nuevos dominios detectados
+    const CLEAN_MIRRORS = [
+        'timmaybealready.com', 
+        'charlestoughrace.com', 
+        'reitshof.com',
+        'richardquestionbuilding.com',
+        'jenniferperformer.com',
+        'p-v-o-e.com'
+    ];
     
-    // Lista de hosts a probar (el original primero, luego los espejos)
-    const hostsToTry = [u.host, ...CLEAN_MIRRORS];
-    const uniqueHosts = [...new Set(hostsToTry)];
+    // Lista de hosts a probar
+    let hostsToTry = [u.host, ...CLEAN_MIRRORS];
+    let uniqueHosts = [...new Set(hostsToTry)];
 
     let html = '';
     let finalOrigin = '';
     let finalEmbedUrl = embedUrl;
 
-    console.log(`[VOE] 🔍 Iniciando búsqueda rápida por HTTP en espejos limpios...`);
+    console.log(`[VOE] 🔍 Iniciando búsqueda rápida por HTTP en espejos...`);
 
     for (const testHost of uniqueHosts) {
         const testUrl = `https://${testHost}/e/${id}${u.search}`;
-        console.log(`[VOE] Probando espejo: ${testUrl}`);
         try {
-            // Timeout rápido (4s)
             const response = await fetchWithRetry(testUrl, {
                 referer: 'https://google.com/',
                 origin: `https://${testHost}`,
-                timeout: 4000
+                timeout: 5000
             }, 1);
 
-            const testHtml = response.data;
+            let testHtml = response.data;
+
+            // DETECCIÓN DE REDIRECCIÓN POR JS (NUEVA ESTRATEGIA)
+            const jsRedirect = testHtml.match(/window\.location\.href\s*=\s*['"](https?:\/\/[^'"]+)['"]/i);
+            if (jsRedirect && !testHtml.includes('sources') && !testHtml.includes('voe-video')) {
+                const newUrl = jsRedirect[1];
+                console.log(`[VOE] ↪️ Siguiendo redirección JS: ${newUrl}`);
+                const redirRes = await fetchWithRetry(newUrl, { referer: testUrl });
+                testHtml = redirRes.data;
+                const newHost = new URL(newUrl).host;
+                if (!uniqueHosts.includes(newHost)) uniqueHosts.push(newHost);
+            }
 
             // Verificamos si es una página real de video
-            if ((testHtml.includes('sources') || testHtml.includes('voe-video') || testHtml.includes('decodeVoeConfig') || testHtml.includes('application/json')) && !testHtml.includes('Just a moment...')) {
-                console.log(`[VOE] ✅ ¡ÉXITO HTTP! Espejo limpio: ${testHost}`);
+            if ((testHtml.includes('sources') || testHtml.includes('voe-video') || testHtml.includes('decodeVoeConfig') || testHtml.includes('application/json') || testHtml.includes('decodeURI(')) && !testHtml.includes('Just a moment...')) {
+                console.log(`[VOE] ✅ ¡ÉXITO HTTP! Host funcional: ${testHost}`);
                 html = testHtml;
                 finalOrigin = `https://${testHost}`;
                 finalEmbedUrl = testUrl;
                 break;
             }
         } catch (e) {
-            // Falló, seguimos
+            // Siguiente host
         }
     }
 
     if (!html) {
-        console.log(`[VOE] 🛡️ Todos los espejos fallaron. Intentando última petición al host original...`);
-        try {
-            const response = await fetchWithRetry(embedUrl, {
-                referer: 'https://google.com/',
-                origin: u.origin
-            });
-            html = response.data;
-            finalOrigin = u.origin;
-            finalEmbedUrl = embedUrl;
-        } catch (e) {
-            throw new Error(`Bloqueo total en VOE (${u.host}). Requiere Puppeteer.`);
-        }
+        throw new Error(`Bloqueo total en VOE (${u.host}). Los espejos no respondieron con contenido válido.`);
     }
 
     const host = new URL(finalEmbedUrl).host;
@@ -126,13 +133,44 @@ async function extract(url) {
 
     let finalVideoUrl = null;
 
-    // ESTRATEGIA 1: Buscar JSON ofuscado (NUEVA)
+    // ESTRATEGIA 1: Buscar JSON ofuscado (Tradicional)
     const jsonMatch = html.match(/<script type="application\/json">\["([^"]+)"\]<\/script>/);
     if (jsonMatch) {
         const config = decodeVoeConfig(jsonMatch[1]);
         if (config && (config.source || config.file)) {
             finalVideoUrl = config.source || config.file;
-            console.log(`[VOE/${host}] ⚡ Decodificación exitosa.`);
+            console.log(`[VOE/${host}] ⚡ Decodificación exitosa (Strategy 1).`);
+        }
+    }
+
+    // ESTRATEGIA 2: Buscar decodeURI ofuscado (NUEVA - 2024/2025)
+    if (!finalVideoUrl) {
+        const uriMatch = html.match(/decodeURI\(['"]([^'"]+)['"]\)/i);
+        if (uriMatch) {
+            console.log(`[VOE/${host}] 🧪 Intentando decodificar via decodeURI (Strategy 2)...`);
+            try {
+                let str = decodeURIComponent(uriMatch[1]);
+                
+                // Aplicar el mismo offset de la función tradicional (-3) y reverse
+                let offsetStr = '';
+                for (let i = 0; i < str.length; i++) {
+                    offsetStr += String.fromCharCode(str.charCodeAt(i) - 3);
+                }
+                let reversed = offsetStr.split('').reverse().join('');
+                
+                // Intentar encontrar una URL o un Base64 dentro
+                const b64Match = reversed.match(/[A-Za-z0-9+/=]{50,}/);
+                if (b64Match) {
+                    const decoded = Buffer.from(b64Match[0], 'base64').toString('utf-8');
+                    if (decoded.includes('.m3u8') || decoded.includes('.mp4')) {
+                        const json = JSON.parse(decoded);
+                        finalVideoUrl = json.file || json.source || json.url;
+                        console.log(`[VOE/${host}] ⚡ Decodificación exitosa (Strategy 2).`);
+                    }
+                }
+            } catch (e) {
+                // Siguiente estrategia
+            }
         }
     }
 
