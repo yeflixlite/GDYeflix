@@ -12,9 +12,6 @@ const express = require('express');
 const cors    = require('cors');
 const path    = require('path');
 
-const playRoutes    = require('./routes/play');
-const proxyRoutes   = require('./routes/proxy');
-const extractRoutes = require('./routes/extract');
 const { embedHandler } = require('./controllers/embedController');
 
 const app  = express();
@@ -32,9 +29,15 @@ app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, 'public')));
 
 // ── Rutas de la API ───────────────────────────────────────────
-app.use('/play',    playRoutes);
-app.use('/proxy',   proxyRoutes);
-app.use('/extract', extractRoutes);
+app.use('/play',  require('./routes/play'));
+app.use('/proxy', require('./routes/proxy'));
+app.use('/extract', require('./routes/extract'));
+app.use('/api/tv', require('./routes/tv')); // Nueva ruta para TV
+
+// Servir reproductor dedicado para TV (live.html)
+app.get('/live', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'live.html'));
+});
 
 // Ruta para compartir/embedear: /v?url=...
 app.get('/v', embedHandler);

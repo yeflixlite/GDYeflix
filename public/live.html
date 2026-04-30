@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Yeflix TV · En Vivo</title>
+    
+    <!-- HLS.js -->
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest/dist/hls.min.js"></script>
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
+    
+    <style>
+        :root {
+            --bg: #05060a;
+            --surface: #0d0f17;
+            --accent: #ef4444; /* Rojo En Vivo */
+            --text: #f8fafc;
+            --text-muted: #94a3b8;
+            --radius: 12px;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        
+        body {
+            font-family: 'Outfit', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+        }
+
+        /* Contenedor del Reproductor */
+        .player-wrapper {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            background: #000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        video {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+        }
+
+        /* Badge EN VIVO */
+        .live-badge {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: rgba(239, 68, 68, 0.9);
+            color: white;
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-weight: 800;
+            font-size: 0.75rem;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            z-index: 100;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            box-shadow: 0 4px 15px rgba(239, 68, 68, 0.4);
+            backdrop-filter: blur(5px);
+        }
+
+        .dot {
+            width: 8px;
+            height: 8px;
+            background: #fff;
+            border-radius: 50%;
+            animation: pulse 1.5s infinite;
+        }
+
+        @keyframes pulse {
+            0% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.5; transform: scale(1.2); }
+            100% { opacity: 1; transform: scale(1); }
+        }
+
+        /* Loader Overlay */
+        #loader-overlay {
+            position: absolute;
+            inset: 0;
+            background: var(--bg);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 200;
+            transition: opacity 0.5s ease;
+        }
+
+        .loader-brand {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 5px;
+            margin-bottom: 40px;
+            animation: logoIntro 0.8s cubic-bezier(0.34, 1.56, 0.64, 1);
+        }
+
+        .brand-name {
+            font-family: 'Bebas Neue', sans-serif;
+            font-size: 5rem;
+            font-weight: 400;
+            color: #E50914;
+            letter-spacing: -2px;
+            line-height: 1;
+            position: relative;
+            text-shadow: 0 10px 20px rgba(0,0,0,0.5);
+            /* Efecto arco sutil */
+            transform: perspective(500px) rotateX(10deg);
+        }
+
+        .brand-name::after {
+            content: "TV";
+            position: absolute;
+            bottom: 5px;
+            right: -45px;
+            font-size: 1.2rem;
+            background: transparent;
+            border: 2px solid #E50914;
+            padding: 2px 6px;
+            border-radius: 4px;
+            letter-spacing: 1px;
+        }
+
+        @keyframes logoIntro { 
+            from { opacity: 0; transform: scale(0.8); } 
+            to { opacity: 1; transform: scale(1); } 
+        }
+
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 3px solid rgba(229, 9, 20, 0.1);
+            border-top-color: #E50914;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            margin-bottom: 15px;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .loading-text {
+            font-weight: 600;
+            font-size: 0.9rem;
+            color: var(--text-muted);
+            letter-spacing: 0.5px;
+        }
+
+        /* Error Overlay */
+        #error-overlay {
+            position: absolute;
+            inset: 0;
+            background: rgba(5, 6, 10, 0.95);
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            padding: 20px;
+            z-index: 300;
+        }
+
+        .error-icon { font-size: 40px; margin-bottom: 15px; }
+        .error-msg { font-weight: 500; color: var(--text-muted); max-width: 300px; }
+    </style>
+</head>
+<body>
+
+    <div class="player-wrapper">
+        <!-- Badge Rojo En Vivo -->
+        <div class="live-badge">
+            <div class="dot"></div>
+            En Vivo
+        </div>
+
+        <!-- Loader -->
+        <div id="loader-overlay">
+            <div class="loader-brand">
+                <div class="brand-name">YEFLIX</div>
+            </div>
+            <div class="spinner"></div>
+            <div class="loading-text" id="loader-msg">Sintonizando señal...</div>
+        </div>
+
+        <!-- Error -->
+        <div id="error-overlay">
+            <div class="error-icon">⚠️</div>
+            <div class="error-msg" id="error-txt">Señal temporalmente fuera de servicio.</div>
+        </div>
+
+        <!-- Video -->
+        <video id="video-player" playsinline controls></video>
+    </div>
+
+    <script>
+        const video = document.getElementById('video-player');
+        const loader = document.getElementById('loader-overlay');
+        const errorOverlay = document.getElementById('error-overlay');
+        const loaderMsg = document.getElementById('loader-msg');
+        
+        // Obtener parámetros de la URL
+        const params = new URLSearchParams(window.location.search);
+        const channelId = params.get('id');
+
+        async function startPlayback() {
+            if (!channelId) {
+                showError("No se especificó un canal válido.");
+                return;
+            }
+
+            try {
+                // Simular el loader de 2 segundos pedido o esperar a la extracción real
+                const startTime = Date.now();
+                
+                // Petición a nuestro backend para extraer el source
+                // Usamos el nuevo endpoint que crearé para TV
+                const response = await fetch(`/api/tv/extract?id=${channelId}`);
+                const data = await response.json();
+
+                if (data.error) throw new Error(data.error);
+
+                // Asegurar que el loader dure al menos 2 segundos para estética
+                const elapsed = Date.now() - startTime;
+                const remaining = Math.max(0, 2000 - elapsed);
+                
+                setTimeout(() => {
+                    setupHls(data.proxyUrl);
+                }, remaining);
+
+            } catch (err) {
+                console.error(err);
+                showError("Fallo al conectar con la señal.");
+            }
+        }
+
+        function setupHls(url) {
+            if (Hls.isSupported()) {
+                const hls = new Hls({
+                    enableWorker: true,
+                    lowLatencyMode: true,
+                    backBufferLength: 90
+                });
+                hls.loadSource(url);
+                hls.attachMedia(video);
+                hls.on(Hls.Events.MANIFEST_PARSED, () => {
+                    hideLoader();
+                    video.play().catch(() => {});
+                });
+                hls.on(Hls.Events.ERROR, (event, data) => {
+                    if (data.fatal) showError("Error crítico en el flujo de video.");
+                });
+            } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+                video.src = url;
+                video.addEventListener('loadedmetadata', () => {
+                    hideLoader();
+                    video.play().catch(() => {});
+                });
+            }
+        }
+
+        function hideLoader() {
+            loader.style.opacity = '0';
+            setTimeout(() => loader.style.display = 'none', 500);
+        }
+
+        function showError(msg) {
+            loader.style.display = 'none';
+            errorOverlay.style.display = 'flex';
+            document.getElementById('error-txt').textContent = msg;
+        }
+
+        // Iniciar
+        startPlayback();
+    </script>
+</body>
+</html>

@@ -16,12 +16,13 @@ const { getMediaHeaders } = require('../utils/browserHeaders');
 // CONFIGURACIÓN DE AHORRO DE BANDA
 // Si es 'false', los segmentos (.ts) se cargarán directo del CDN original.
 // Esto ahorra el 95% del ancho de banda del servidor.
-const PROXY_SEGMENTS = process.env.PROXY_SEGMENTS !== 'false'; 
+const PROXY_SEGMENTS = process.env.PROXY_SEGMENTS === 'true'; 
 
 // Lista de dominios que permiten carga directa (CORS abierto o sin Referer estricto)
 const DIRECT_DOMAINS = [
     'voe.sx', 'timmaybealready.com', 'doodstream.com', 'dood.re', 
-    'filemoon.sx', 'googleusercontent.com'
+    'filemoon.sx', 'googleusercontent.com', 'cloudfront.net', 
+    'ksdjugfsddeports.com', 'deportes.ksdjugfsddeports.com'
 ];
 
 // Agentes con Keep-Alive para rendimiento
