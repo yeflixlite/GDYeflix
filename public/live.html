@@ -259,9 +259,39 @@
                     hideLoader();
                     video.play().catch(() => {});
                 });
+                
+                // MANEJO DE ERRORES MEJORADO PARA EVITAR "ERROR CRÍTICO"
                 hls.on(Hls.Events.ERROR, (event, data) => {
-                    if (data.fatal) showError("Error crítico en el flujo de video.");
+                    if (data.fatal) {
+                        console.warn('[HLS] Error fatal detectado:', data.type);
+                        switch (data.type) {
+                            case Hls.ErrorTypes.NETWORK_ERROR:
+                                console.log('[HLS] Error de red. Intentando reconectar...');
+                                hls.startLoad();
+                                break;
+                            case Hls.ErrorTypes.MEDIA_ERROR:
+                                console.log('[HLS] Error de media. Recuperando...');
+                                hls.recoverMediaError();
+                                break;
+                            default:
+                                console.log('[HLS] Error irrecuperable. Reiniciando stream...');
+                                hls.destroy();
+                                setupHls(url);
+                                break;
+                        }
+                    }
                 });
+
+                // AUTO-RESYNC AL DESPAUSAR (EVITA EL ERROR DE BUFFER ANTIGUO)
+                video.onplay = () => {
+                    const dur = video.duration;
+                    const pos = video.currentTime;
+                    // Si estamos más de 30s detrás del "en vivo", saltamos al borde
+                    if (dur > 0 && (dur - pos) > 30) {
+                        console.log('[Live] Resincronizando con el borde en vivo...');
+                        video.currentTime = dur - 0.5;
+                    }
+                };
             } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
                 video.src = url;
                 video.addEventListener('loadedmetadata', () => {

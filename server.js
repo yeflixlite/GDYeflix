@@ -58,7 +58,11 @@ app.use((err, req, res, _next) => {
 });
 
 // ── Inicio ────────────────────────────────────────────────────
-app.listen(PORT, () => {
-  console.log(`\n🚀  Server Proxy corriendo en http://localhost:${PORT}`);
-  console.log(`📺  Abre el reproductor en  http://localhost:${PORT}/\n`);
-});
+if (process.env.NODE_ENV !== 'production') {
+  app.listen(PORT, () => {
+    console.log(`\n🚀  Server Proxy corriendo en http://localhost:${PORT}`);
+    console.log(`📺  Abre el reproductor en  http://localhost:${PORT}/\n`);
+  });
+}
+
+module.exports = app;
