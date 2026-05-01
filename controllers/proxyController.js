@@ -21,7 +21,7 @@ const PROXY_SEGMENTS = process.env.PROXY_SEGMENTS === 'true';
 // Lista de dominios que permiten carga directa (CORS abierto o sin Referer estricto)
 const DIRECT_DOMAINS = [
     'voe.sx', 'timmaybealready.com', 'doodstream.com', 'dood.re', 
-    'filemoon.sx', 'googleusercontent.com', 'cloudfront.net', 'dmcdn.net'
+    'filemoon.sx', 'googleusercontent.com', 'cloudfront.net'
 ];
 
 // Agentes con Keep-Alive para rendimiento
