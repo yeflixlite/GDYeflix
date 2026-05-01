@@ -251,7 +251,12 @@
                 const hls = new Hls({
                     enableWorker: true,
                     lowLatencyMode: true,
-                    backBufferLength: 90
+                    backBufferLength: 60,
+                    liveSyncDurationCount: 3, // Mantenerse a 3 fragmentos del borde
+                    liveMaxLatencyDurationCount: 10,
+                    manifestLoadingMaxRetry: 10,
+                    levelLoadingMaxRetry: 10,
+                    fragLoadingMaxRetry: 10
                 });
                 hls.loadSource(url);
                 hls.attachMedia(video);
@@ -282,16 +287,32 @@
                     }
                 });
 
-                // AUTO-RESYNC AL DESPAUSAR (EVITA EL ERROR DE BUFFER ANTIGUO)
+                // AUTO-RESYNC AL DESPAUSAR
                 video.onplay = () => {
                     const dur = video.duration;
                     const pos = video.currentTime;
-                    // Si estamos más de 30s detrás del "en vivo", saltamos al borde
                     if (dur > 0 && (dur - pos) > 30) {
-                        console.log('[Live] Resincronizando con el borde en vivo...');
                         video.currentTime = dur - 0.5;
                     }
                 };
+
+                // WATCHDOG: Detectar si el video se quedó trabado al final
+                setInterval(() => {
+                    if (video.paused || video.ended) return;
+                    
+                    const dur = video.duration;
+                    const pos = video.currentTime;
+                    
+                    // Si estamos al final de lo que cargó (0:59/0:59) y no avanza
+                    if (dur > 0 && Math.abs(dur - pos) < 1.0) {
+                        console.log('[Watchdog] Detectado fin de buffer en vivo. Resincronizando...');
+                        video.currentTime = dur - 0.2; // Empujoncito
+                        if (hls.liveSyncPosition) {
+                            video.currentTime = hls.liveSyncPosition - 0.5;
+                        }
+                    }
+                }, 5000);
+
             } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
                 video.src = url;
                 video.addEventListener('loadedmetadata', () => {
