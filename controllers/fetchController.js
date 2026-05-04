@@ -1,44 +1,15 @@
 /**
- * ============================================================
- *  controllers/fetchController.js
- *  Proxy HTML para PelisJuanita.
- *  Usa Puppeteer-extra-stealth para pasar el WAF de Cloudflare.
- *  Solo HTML, whitelist estricta, caché 5 min, bloqueo de media.
- * ============================================================
+ * controllers/fetchController.js
+ * Proxy HTML ligero para PelisJuanita (sin Puppeteer).
+ * Usa axios con headers de navegador real.
  */
 'use strict';
 
-const puppeteer     = require('puppeteer-extra');
-const StealthPlugin = require('puppeteer-extra-plugin-stealth');
-
-puppeteer.use(StealthPlugin());
+const axios = require('axios');
 
 const ALLOWED_DOMAINS = ['pelisjuanita.com'];
-const CACHE_TTL       = 5 * 60 * 1000; // 5 min
-const cache           = new Map();
-
-// Reutilizar una sola instancia de browser
-let _browser = null;
-async function getBrowser() {
-    if (_browser) {
-        try { await _browser.version(); return _browser; } catch { _browser = null; }
-    }
-    _browser = await puppeteer.launch({
-        headless: 'new',
-        executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
-        args: [
-            '--no-sandbox',
-            '--disable-setuid-sandbox',
-            '--disable-dev-shm-usage',
-            '--disable-gpu',
-            '--no-first-run',
-            '--no-zygote',
-            '--single-process',
-            '--disable-extensions',
-        ],
-    });
-    return _browser;
-}
+const CACHE_TTL = 5 * 60 * 1000;
+const cache = new Map();
 
 async function fetchHandler(req, res) {
     const { url } = req.query;
@@ -46,15 +17,15 @@ async function fetchHandler(req, res) {
 
     const target = decodeURIComponent(url);
 
-    // Whitelist
     let host;
     try { host = new URL(target).hostname.replace('www.', ''); }
     catch { return res.status(400).json({ error: 'URL inválida' }); }
+
     if (!ALLOWED_DOMAINS.some(d => host.endsWith(d))) {
         return res.status(403).json({ error: 'Dominio no permitido' });
     }
 
-    // Caché
+    // Caché simple
     const hit = cache.get(target);
     if (hit && Date.now() - hit.ts < CACHE_TTL) {
         res.setHeader('Access-Control-Allow-Origin', '*');
@@ -62,43 +33,38 @@ async function fetchHandler(req, res) {
         return res.type('html').send(hit.html);
     }
 
-    let page;
     try {
-        const browser = await getBrowser();
-        page = await browser.newPage();
-
-        // Bloquear imágenes, fuentes, media y scripts de terceros para ahorrar banda
-        await page.setRequestInterception(true);
-        page.on('request', r => {
-            const t = r.resourceType();
-            const u = r.url();
-            if (['image','media','font','websocket'].includes(t)) return r.abort();
-            // Bloquear CDNs de anuncios / analytics
-            if (u.includes('google-analytics') || u.includes('doubleclick') || u.includes('cdn.mxmovies')) return r.abort();
-            r.continue();
+        const response = await axios.get(target, {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+                'Accept-Language': 'es-MX,es;q=0.9,en;q=0.8',
+                'Accept-Encoding': 'gzip, deflate, br',
+                'Referer': 'https://pelisjuanita.com/',
+                'sec-fetch-dest': 'document',
+                'sec-fetch-mode': 'navigate',
+                'sec-fetch-site': 'same-origin',
+                'Cache-Control': 'no-cache',
+                'Connection': 'keep-alive',
+            },
+            responseType: 'text',
+            maxRedirects: 5,
+            timeout: 15_000,
+            maxContentLength: 512 * 1024,
+            validateStatus: s => s < 500,
         });
 
-        await page.goto(target, { waitUntil: 'domcontentloaded', timeout: 20_000 });
-
-        // Esperar hasta que desaparezca el challenge de Cloudflare
-        await page.waitForFunction(
-            () => !document.title.toLowerCase().includes('just a moment'),
-            { timeout: 12_000 }
-        ).catch(() => {});
-
-        const html = await page.content();
+        const html = response.data || '';
 
         cache.set(target, { html, ts: Date.now() });
 
         res.setHeader('Access-Control-Allow-Origin', '*');
         res.setHeader('X-Cache', 'MISS');
-        res.type('html').send(html);
+        res.type('html').status(response.status).send(html);
 
     } catch (err) {
         console.error('[fetch]', err.message);
         res.status(502).json({ error: err.message });
-    } finally {
-        if (page) await page.close().catch(() => {});
     }
 }
 
