@@ -1,77 +1,104 @@
 /**
  * ============================================================
  *  controllers/fetchController.js
- *  Proxy ultra-ligero para HTML de PelisJuanita.
- *  - Solo permite URLs de pelisjuanita.com (whitelist)
- *  - Solo descarga text/html (rechaza binarios/video/imágenes)
- *  - Límite de tamaño de respuesta: 500KB
- *  - Consumo mínimo de ancho de banda
+ *  Proxy HTML para PelisJuanita.
+ *  Usa Puppeteer-extra-stealth para pasar el WAF de Cloudflare.
+ *  Solo HTML, whitelist estricta, caché 5 min, bloqueo de media.
  * ============================================================
  */
 'use strict';
 
-const axios = require('axios');
+const puppeteer     = require('puppeteer-extra');
+const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 
-// Dominios permitidos (whitelist estricta)
+puppeteer.use(StealthPlugin());
+
 const ALLOWED_DOMAINS = ['pelisjuanita.com'];
+const CACHE_TTL       = 5 * 60 * 1000; // 5 min
+const cache           = new Map();
 
-// Tamaño máximo de respuesta en bytes (500 KB)
-const MAX_RESPONSE_SIZE = 500 * 1024;
+// Reutilizar una sola instancia de browser
+let _browser = null;
+async function getBrowser() {
+    if (_browser) {
+        try { await _browser.version(); return _browser; } catch { _browser = null; }
+    }
+    _browser = await puppeteer.launch({
+        headless: 'new',
+        executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+        args: [
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',
+            '--disable-gpu',
+            '--no-first-run',
+            '--no-zygote',
+            '--single-process',
+            '--disable-extensions',
+        ],
+    });
+    return _browser;
+}
 
 async function fetchHandler(req, res) {
+    const { url } = req.query;
+    if (!url) return res.status(400).json({ error: 'Falta url' });
+
+    const target = decodeURIComponent(url);
+
+    // Whitelist
+    let host;
+    try { host = new URL(target).hostname.replace('www.', ''); }
+    catch { return res.status(400).json({ error: 'URL inválida' }); }
+    if (!ALLOWED_DOMAINS.some(d => host.endsWith(d))) {
+        return res.status(403).json({ error: 'Dominio no permitido' });
+    }
+
+    // Caché
+    const hit = cache.get(target);
+    if (hit && Date.now() - hit.ts < CACHE_TTL) {
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('X-Cache', 'HIT');
+        return res.type('html').send(hit.html);
+    }
+
+    let page;
     try {
-        const { url } = req.query;
+        const browser = await getBrowser();
+        page = await browser.newPage();
 
-        if (!url) {
-            return res.status(400).json({ error: 'Falta el parámetro url' });
-        }
-
-        const decodedUrl = decodeURIComponent(url);
-
-        // Whitelist estricta: solo pelisjuanita.com
-        let hostname;
-        try {
-            hostname = new URL(decodedUrl).hostname.replace('www.', '');
-        } catch {
-            return res.status(400).json({ error: 'URL inválida' });
-        }
-
-        if (!ALLOWED_DOMAINS.some(d => hostname.endsWith(d))) {
-            return res.status(403).json({ error: 'Dominio no permitido' });
-        }
-
-        const response = await axios.get(decodedUrl, {
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-                'Accept-Language': 'es-MX,es;q=0.9,en;q=0.8',
-                'Referer': 'https://pelisjuanita.com/',
-                'Cache-Control': 'no-cache',
-            },
-            // Solo descargar texto, nunca binarios
-            responseType: 'text',
-            maxRedirects: 5,
-            timeout: 15_000,
-            // Limite de tamaño: aborta si supera los 500KB
-            maxContentLength: MAX_RESPONSE_SIZE,
-            validateStatus: (s) => s < 400,
+        // Bloquear imágenes, fuentes, media y scripts de terceros para ahorrar banda
+        await page.setRequestInterception(true);
+        page.on('request', r => {
+            const t = r.resourceType();
+            const u = r.url();
+            if (['image','media','font','websocket'].includes(t)) return r.abort();
+            // Bloquear CDNs de anuncios / analytics
+            if (u.includes('google-analytics') || u.includes('doubleclick') || u.includes('cdn.mxmovies')) return r.abort();
+            r.continue();
         });
 
-        const contentType = response.headers['content-type'] || '';
+        await page.goto(target, { waitUntil: 'domcontentloaded', timeout: 20_000 });
 
-        // Rechazar si no es texto/HTML (no queremos servir imágenes ni videos nunca)
-        if (!contentType.includes('text/html') && !contentType.includes('text/plain') && !contentType.includes('application/json')) {
-            return res.status(415).json({ error: 'Tipo de contenido no permitido: ' + contentType });
-        }
+        // Esperar hasta que desaparezca el challenge de Cloudflare
+        await page.waitForFunction(
+            () => !document.title.toLowerCase().includes('just a moment'),
+            { timeout: 12_000 }
+        ).catch(() => {});
 
-        res.setHeader('Content-Type', 'text/html; charset=utf-8');
+        const html = await page.content();
+
+        cache.set(target, { html, ts: Date.now() });
+
         res.setHeader('Access-Control-Allow-Origin', '*');
-        res.setHeader('Cache-Control', 'no-cache');
-        res.status(200).send(response.data);
+        res.setHeader('X-Cache', 'MISS');
+        res.type('html').send(html);
 
     } catch (err) {
-        const status = err.response?.status || 502;
-        res.status(status).json({ error: err.message || 'Error al obtener el contenido' });
+        console.error('[fetch]', err.message);
+        res.status(502).json({ error: err.message });
+    } finally {
+        if (page) await page.close().catch(() => {});
     }
 }
 
