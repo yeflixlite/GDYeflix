@@ -32,6 +32,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.use('/play',  require('./routes/play'));
 app.use('/proxy', require('./routes/proxy'));
 app.use('/extract', require('./routes/extract'));
+app.use('/fetch', require('./routes/fetch'));   // Proxy HTML ligero para PelisJuanita
 app.use('/api/tv', require('./routes/tv')); // Nueva ruta para TV
 
 // Servir reproductor dedicado para TV (live.html)
