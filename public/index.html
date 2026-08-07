@@ -1,0 +1,550 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Proxy Yeflix · Reproductor Universal</title>
+  <meta name="description" content="Reproductor de video universal con bypass de CORS y extracción inteligente para múltiples servicios." />
+
+  <!-- HLS.js -->
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@latest/dist/hls.min.js"></script>
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Inter:wght@400;600&display=swap" rel="stylesheet" />
+
+  <style>
+    /* ═══════════════════════════════════════════════════════
+       PREMIUM DESIGN SYSTEM
+    ═══════════════════════════════════════════════════════ */
+    :root {
+      --bg-base:      #05060a;
+      --bg-surface:   #0d0f17;
+      --bg-card:      #121520;
+      --bg-input:     #1a1d2d;
+      --accent:       #6366f1; /* Indigo */
+      --accent-light: #818cf8;
+      --accent-glow:  rgba(99, 102, 241, 0.4);
+      --green:        #10b981;
+      --red:          #ef4444;
+      --yellow:       #f59e0b;
+      --text-primary: #f8fafc;
+      --text-secondary:#94a3b8;
+      --text-muted:   #475569;
+      --border:       rgba(255,255,255,0.06);
+      --radius-md:    12px;
+      --radius-lg:    24px;
+      --glass:        rgba(18, 21, 32, 0.7);
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Outfit', sans-serif;
+      background: var(--bg-base);
+      color: var(--text-primary);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow-x: hidden;
+    }
+
+    /* Fondo dinámico animado */
+    .bg-animation {
+      position: fixed; inset: 0; z-index: -1;
+      background: radial-gradient(circle at 20% 10%, rgba(99, 102, 241, 0.15) 0%, transparent 40%),
+                  radial-gradient(circle at 80% 90%, rgba(16, 185, 129, 0.1) 0%, transparent 40%);
+      filter: blur(100px);
+      animation: ambientPulse 10s infinite alternate;
+    }
+    @keyframes ambientPulse {
+      0%   { opacity: 0.6; transform: scale(1); }
+      100% { opacity: 1; transform: scale(1.1); }
+    }
+
+    /* ── Header ──────────────────────────────────────────── */
+    header {
+      padding: 24px 5%;
+      display: flex; align-items: center; justify-content: space-between;
+      backdrop-filter: blur(20px);
+      background: rgba(5, 6, 10, 0.8);
+      border-bottom: 1px solid var(--border);
+      position: sticky; top: 0; z-index: 1000;
+    }
+    .logo {
+      display: flex; align-items: center; gap: 12px;
+      font-weight: 800; font-size: 1.5rem; letter-spacing: -0.5px;
+      background: linear-gradient(to right, #fff, var(--accent-light));
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    }
+    .logo i {
+      width: 40px; height: 40px;
+      background: linear-gradient(135deg, var(--accent), #a855f7);
+      border-radius: 10px; display: flex; align-items: center; justify-content: center;
+      font-size: 20px; -webkit-text-fill-color: #fff;
+    }
+
+    /* ── Main Layout ─────────────────────────────────────── */
+    main {
+      width: 100%; max-width: 1200px;
+      margin: 0 auto; padding: 40px 24px;
+      display: grid; grid-template-columns: 1fr 380px; gap: 32px;
+    }
+
+    @media (max-width: 1000px) {
+      main { grid-template-columns: 1fr; }
+    }
+
+    /* ── Video Player Section ────────────────────────────── */
+    .player-container {
+      display: flex; flex-direction: column; gap: 20px;
+    }
+    .video-wrapper {
+      background: #000; border-radius: var(--radius-lg); overflow: hidden;
+      border: 1px solid var(--border); position: relative;
+      aspect-ratio: 16/9; display: flex; align-items: center; justify-content: center;
+      box-shadow: 0 30px 100px rgba(0,0,0,0.8), 0 0 40px var(--accent-glow);
+    }
+    video { width: 100%; height: 100%; outline: none; }
+    
+    .placeholder-overlay {
+      position: absolute; inset: 0; background: var(--bg-card);
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      text-align: center; gap: 20px; z-index: 10;
+    }
+    .placeholder-overlay .play-circle {
+      width: 80px; height: 80px; border-radius: 50%;
+      background: rgba(99, 102, 241, 0.1); border: 2px solid var(--accent);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 32px; color: var(--accent); transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+    .video-wrapper:hover .play-circle { transform: scale(1.15); box-shadow: 0 0 30px var(--accent-glow); }
+
+    /* ── Control Sidebar ─────────────────────────────────── */
+    .sidebar { display: flex; flex-direction: column; gap: 24px; }
+    
+    .card {
+      background: var(--bg-card); border: 1px solid var(--border);
+      border-radius: var(--radius-md); padding: 24px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+    }
+    
+    .tab-nav {
+      display: flex; background: var(--bg-input); border-radius: 12px; padding: 4px; margin-bottom: 20px;
+    }
+    .tab-nav button {
+      flex: 1; border: none; background: none; padding: 10px; border-radius: 9px;
+      color: var(--text-secondary); font-family: inherit; font-weight: 600; font-size: 0.85rem;
+      cursor: pointer; transition: all 0.2s;
+    }
+    .tab-nav button.active {
+      background: var(--accent); color: #fff; box-shadow: 0 4px 12px var(--accent-glow);
+    }
+
+    .input-field {
+      display: flex; flex-direction: column; gap: 10px;
+    }
+    .input-field input {
+      background: var(--bg-input); border: 1px solid var(--border);
+      border-radius: 12px; padding: 14px 18px; color: #fff;
+      font-family: inherit; font-size: 0.95rem; outline: none;
+      transition: border-color 0.2s;
+    }
+    .input-field input:focus { border-color: var(--accent-light); }
+    
+    .btn-main {
+      background: linear-gradient(135deg, var(--accent), #8b5cf6);
+      color: #fff; border: none; border-radius: 12px; padding: 16px;
+      font-weight: 700; font-size: 1rem; cursor: pointer;
+      box-shadow: 0 8px 25px var(--accent-glow);
+      transition: transform 0.2s, filter 0.2s;
+      margin-top: 10px; display: flex; align-items: center; justify-content: center; gap: 10px;
+    }
+    .btn-main:hover { transform: translateY(-2px); filter: brightness(1.1); }
+    .btn-main:disabled { opacity: 0.5; transform: none; cursor: not-allowed; }
+
+    /* ── Info & Logs ─────────────────────────────────────── */
+    .status-area {
+      display: flex; align-items: center; gap: 10px; font-size: 0.85rem; padding: 10px 0;
+    }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: #475569; }
+    .dot.busy { background: var(--accent); animation: pulse 1s infinite; }
+    .dot.ok { background: var(--green); }
+    .dot.err { background: var(--red); }
+    
+    @keyframes pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.5; transform: scale(1.3); } }
+
+    .tag {
+      font-size: 0.65rem; font-weight: 800; text-transform: uppercase;
+      padding: 3px 10px; border-radius: 99px; background: rgba(255,255,255,0.05);
+      color: var(--text-secondary); border: 1px solid rgba(255,255,255,0.1);
+    }
+    .tag.m3u8 { background: rgba(16, 185, 129, 0.1); color: var(--green); border-color: rgba(16, 185, 129, 0.2); }
+    .tag.vip { background: rgba(245, 158, 11, 0.1); color: var(--yellow); border-color: rgba(245, 158, 11, 0.2); }
+
+    .log-container {
+      background: #08090f; border-radius: 10px; padding: 12px; margin-top: 15px;
+      font-family: 'Inter', monospace; font-size: 0.75rem; color: #64748b;
+      max-height: 150px; overflow-y: auto; line-height: 1.6; border: 1px solid rgba(255,255,255,0.03);
+    }
+    .log-line.hl { color: var(--accent-light); }
+    .log-line.sc { color: var(--green); }
+
+    /* ── HLS Custom Controls ────────────────────────────── */
+    .hls-menu {
+      position: absolute; top: 20px; right: 20px; z-index: 100;
+      background: rgba(13, 15, 23, 0.9); backdrop-filter: blur(10px);
+      border: 1px solid var(--border); border-radius: 12px; padding: 10px;
+      display: none; flex-direction: column; gap: 8px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+    }
+    .menu-group { display: flex; flex-direction: column; gap: 4px; }
+    .menu-group label { font-size: 10px; color: var(--accent-light); font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; }
+    .menu-group select { 
+      background: var(--bg-input); color: #fff; border: 1px solid var(--border);
+      border-radius: 6px; padding: 4px 8px; font-size: 0.8rem; cursor: pointer; outline: none;
+    }
+
+    /* ── Examples ────────────────────────────────────────── */
+    .examples { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+    .ex-chip {
+      background: rgba(255,255,255,0.03); border: 1px solid var(--border);
+      padding: 5px 12px; border-radius: 8px; font-size: 0.75rem; color: var(--text-secondary);
+      cursor: pointer; transition: all 0.2s;
+    }
+    .ex-chip:hover { background: rgba(99, 102, 241, 0.1); border-color: var(--accent); color: #fff; }
+    .ex-chip.premium { border-color: var(--yellow); color: var(--yellow); background: rgba(245, 158, 11, 0.05); }
+
+    /* ── Toasts ──────────────────────────────────────────── */
+    #toast {
+      position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%);
+      background: var(--accent); color: #fff; padding: 12px 24px; border-radius: 50px;
+      font-weight: 600; box-shadow: 0 10px 30px var(--accent-glow);
+      opacity: 0; pointer-events: none; transition: opacity 0.3s, transform 0.3s; z-index: 10000;
+    }
+    #toast.show { opacity: 1; transform: translate(-50%, -10px); }
+
+    .loader {
+      border: 3px solid rgba(255,255,255,0.1); border-top: 3px solid #fff;
+      border-radius: 50%; width: 20px; height: 20px; animation: spin 1s linear infinite;
+      display: none;
+    }
+    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+  </style>
+</head>
+<body>
+
+<div class="bg-animation"></div>
+
+<header>
+  <div class="logo"><i>🛰</i> Proxy Yeflix</div>
+  <div class="tag m3u8">Engine v2.0</div>
+</header>
+
+<main>
+  <div class="player-container">
+    <div class="video-wrapper" id="videoWrapper">
+      <div class="placeholder-overlay" id="overlay">
+        <div class="play-circle">▶</div>
+        <div style="max-width: 300px;">
+          <h2 style="font-size: 1.25rem; margin-bottom: 8px;">Listo para transmitir</h2>
+          <p style="font-size: 0.85rem; color: var(--text-secondary);">Soporta Doodstream, Streamtape, StreamWish, HGCloud y Filemoon.</p>
+        </div>
+      </div>
+      
+      <div class="hls-menu" id="hlsMenu">
+        <div class="menu-group">
+          <label>Calidad</label>
+          <select id="qualitySelect"><option>Automático</option></select>
+        </div>
+        <div class="menu-group" id="audioGroup">
+          <label>Audio / Idioma</label>
+          <select id="audioSelect"></select>
+        </div>
+      </div>
+
+      <video id="player" controls playsinline></video>
+    </div>
+
+    <div class="card" style="padding: 16px 24px;">
+      <div style="display: flex; justify-content: space-between; align-items: center;">
+        <div class="status-area">
+          <div id="statusDot" class="dot"></div>
+          <span id="statusText">Esperando URL...</span>
+        </div>
+        <div id="providerTag" class="tag" style="display: none;">Provider</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="sidebar">
+    <div class="card">
+      <div class="tab-nav">
+        <button id="btnAuto" class="active" onclick="setMode('auto')">Universal</button>
+        <button id="btnHttp" onclick="setMode('http')">Solo HTTP</button>
+        <button id="btnPup" onclick="setMode('puppeteer')">Robot</button>
+      </div>
+
+      <div class="input-field">
+        <label style="font-size: 0.75rem; color: var(--text-secondary); font-weight: 700; text-transform: uppercase;">URL del Video</label>
+        <input type="text" id="urlInput" placeholder="Pega el enlace de Filemoon, Streamwish, VOE, etc..." spellcheck="false">
+      </div>
+
+      <button class="btn-main" id="btnMain" onclick="handleStart()">
+        <div class="loader" id="loader"></div>
+        <span id="btnText">INICIAR STREAMING</span>
+      </button>
+
+      <div class="examples">
+        <div class="ex-chip premium" onclick="loadEx('https://minochinos.com/v/q5e4mv754sh5')">Earvids (Mino)</div>
+        <div class="ex-chip premium" onclick="loadEx('https://voe.sx/e/ibr5q1kl83ib')">VOE</div>
+        <div class="ex-chip premium" onclick="loadEx('https://bysesukior.com/e/wjjrejwr7iza')">Filemoon (Suki)</div>
+        <div class="ex-chip" onclick="loadEx('https://hgcloud.to/e/2uighyt93t26')">HGCloud</div>
+      </div>
+
+      <div class="log-container" id="log">
+        <div class="log-line">Consola lista. Cargando módulos...</div>
+      </div>
+    </div>
+
+    <div class="card" id="infoCard" style="display: none; background: rgba(5,6,10,0.4);">
+      <h3 style="font-size: 0.8rem; text-transform: uppercase; margin-bottom: 12px; color: var(--accent-light);">Información del Stream</h3>
+      <div style="display: flex; flex-direction: column; gap: 8px;">
+        <div style="display: flex; justify-content: space-between; font-size: 0.8rem;">
+          <span style="color: var(--text-secondary);">Formato:</span>
+          <span id="infoFormat" style="font-weight: 600; color: #fff;">-</span>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 4px; font-size: 0.7rem; margin-top: 8px;">
+          <span style="color: var(--text-secondary);">Source URL:</span>
+          <code id="infoRawUrl" style="word-break: break-all; background: #000; padding: 6px; border-radius: 6px; color: var(--accent-light); max-height: 80px; overflow-y: auto;">-</code>
+        </div>
+      </div>
+    </div>
+  </div>
+</main>
+
+<div id="toast">Toast Message</div>
+
+<script>
+  let hlsInstance = null;
+  let currentMode = 'auto';
+
+  function setMode(m) {
+    currentMode = m;
+    ['btnAuto', 'btnHttp', 'btnPup'].forEach(id => document.getElementById(id).classList.remove('active'));
+    document.getElementById('btn' + m.charAt(0).toUpperCase() + m.slice(1)).classList.add('active');
+    addLog("Modo cambiado a: " + m);
+  }
+
+  function addLog(txt, type = '') {
+    const log = document.getElementById('log');
+    const line = document.createElement('div');
+    line.className = 'log-line ' + type;
+    line.textContent = `[${new Date().toLocaleTimeString()}] ${txt}`;
+    log.appendChild(line);
+    log.scrollTop = log.scrollHeight;
+  }
+
+  function showToast(msg) {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.classList.add('show');
+    setTimeout(() => t.classList.remove('show'), 3000);
+  }
+
+  function loadEx(url) {
+    document.getElementById('urlInput').value = url;
+    handleStart();
+  }
+
+  async function handleStart() {
+    const url = document.getElementById('urlInput').value.trim();
+    if (!url) return showToast("Por favor ingresa una URL válida");
+
+    toggleLoading(true);
+    resetPlayer();
+    
+    addLog("Iniciando detección para: " + url.substring(0, 40) + "...");
+    updateStatus('busy', 'Analizando proveedor y extrayendo...');
+
+    try {
+      const minWait = new Promise(resolve => setTimeout(resolve, 9000));
+      window.menuWaitPromise = new Promise(resolve => setTimeout(resolve, 8000));
+      
+      const data = await fetch(`/play?url=${encodeURIComponent(url)}&mode=${currentMode}`).then(r => r.json());
+      if (data.error) throw new Error(data.error);
+
+      addLog("¡Éxito! Enlace extraído via " + data.method, 'sc');
+      
+      // PASO 1: Empezar a cargar el video en segundo plano
+      initPlayer(data.proxyUrl, data.type, false); // false = no mostrar todavía
+
+      // PASO 2: Esperar a que se cumplan los 9 segundos
+      await minWait;
+
+      // PASO 3: Mostrar el reproductor
+      document.getElementById('overlay').style.display = 'none';
+      document.getElementById('player').style.display = 'block';
+      
+      updateStatus('ok', 'Streaming listo');
+      showStreamInfo(data);
+
+    } catch (err) {
+      addLog("Error: " + err.message, 'err');
+      updateStatus('err', 'Fallo en la extracción');
+      showToast(err.message);
+    } finally {
+      toggleLoading(false);
+    }
+  }
+
+  function initPlayer(source, type, showImmediately = true) {
+    const video = document.getElementById('player');
+    const overlay = document.getElementById('overlay');
+    
+    if (showImmediately) {
+      overlay.style.display = 'none';
+      video.style.display = 'block';
+    } else {
+      video.style.display = 'none'; // Aseguramos que esté oculto mientras carga
+    }
+
+    if (type === 'm3u8') {
+      if (Hls.isSupported()) {
+        if (hlsInstance) hlsInstance.destroy();
+        hlsInstance = new Hls({ 
+          enableWorker: true,
+          lowLatencyMode: false,
+          backBufferLength: 90,
+          maxBufferLength: 60,
+          maxMaxBufferLength: 120,
+          maxBufferSize: 60 * 1024 * 1024,
+          fragLoadingTimeOut: 20000,
+          manifestLoadingTimeOut: 20000,
+          levelLoadingTimeOut: 20000,
+          nudgeOffset: 0.1,
+          nudgeMaxRetries: 5,
+        });
+        hlsInstance.loadSource(source);
+        hlsInstance.attachMedia(video);
+        hlsInstance.on(Hls.Events.MANIFEST_PARSED, () => {
+          updateHlsMenu();
+          if (showImmediately) video.play().catch(() => {});
+          else {
+              // Si estamos en segundo plano, intentamos auto-play pero silenciado para evitar bloqueos
+              video.play().catch(() => {});
+          }
+        });
+        hlsInstance.on(Hls.Events.AUDIO_TRACKS_UPDATED, updateAudioMenu);
+      } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+        video.src = source;
+        if (showImmediately) video.play();
+      }
+    } else {
+      video.src = source;
+      if (showImmediately) video.play();
+    }
+  }
+
+  function updateHlsMenu() {
+    const menu = document.getElementById('hlsMenu');
+    const qSelect = document.getElementById('qualitySelect');
+    const aSelect = document.getElementById('audioSelect');
+    const aGroup = document.getElementById('audioGroup');
+
+    if (!hlsInstance) return;
+
+    // Qualities
+    qSelect.innerHTML = '<option value="-1">Auto</option>';
+    hlsInstance.levels.forEach((lvl, i) => {
+      const opt = document.createElement('option');
+      opt.value = i;
+      
+      // Intentar obtener la altura (ej. 720p), si no existe usar el nombre (ej. "720p" inyectado),
+      // y si tampoco existe, caer en el "Nivel X" por defecto.
+      let label = 'Nivel ' + i;
+      if (lvl.height && lvl.height > 0) {
+          label = lvl.height + 'p';
+      } else if (lvl.name) {
+          label = lvl.name;
+      }
+      
+      opt.textContent = label;
+      qSelect.appendChild(opt);
+    });
+    qSelect.onchange = () => (hlsInstance.currentLevel = parseInt(qSelect.value));
+
+    // Audio
+    updateAudioMenu();
+
+    if (window.menuWaitPromise) {
+      window.menuWaitPromise.then(() => {
+        if (hlsInstance) menu.style.display = 'flex';
+      });
+    } else {
+      menu.style.display = 'flex';
+    }
+  }
+
+  function updateAudioMenu() {
+    const aSelect = document.getElementById('audioSelect');
+    const aGroup = document.getElementById('audioGroup');
+
+    if (!hlsInstance || !hlsInstance.audioTracks || hlsInstance.audioTracks.length <= 1) {
+      aGroup.style.display = 'none';
+      return;
+    }
+
+    aGroup.style.display = 'flex';
+    aSelect.innerHTML = '';
+    hlsInstance.audioTracks.forEach((t, i) => {
+      const opt = document.createElement('option');
+      opt.value = i;
+      opt.textContent = t.name || t.lang || 'Track ' + i;
+      aSelect.appendChild(opt);
+    });
+    aSelect.onchange = () => (hlsInstance.audioTrack = parseInt(aSelect.value));
+  }
+
+  function resetPlayer() {
+    const video = document.getElementById('player');
+    const overlay = document.getElementById('overlay');
+    const menu = document.getElementById('hlsMenu');
+    
+    if (hlsInstance) { hlsInstance.destroy(); hlsInstance = null; }
+    video.pause();
+    video.src = "";
+    video.style.display = 'none';
+    overlay.style.display = 'flex';
+    menu.style.display = 'none';
+  }
+
+  function toggleLoading(busy) {
+    const btn = document.getElementById('btnMain');
+    const loader = document.getElementById('loader');
+    const txt = document.getElementById('btnText');
+    btn.disabled = busy;
+    loader.style.display = busy ? 'block' : 'none';
+    txt.style.display = busy ? 'none' : 'block';
+  }
+
+  function updateStatus(state, msg) {
+    const dot = document.getElementById('statusDot');
+    const txt = document.getElementById('statusText');
+    dot.className = 'dot ' + state;
+    txt.textContent = msg;
+  }
+
+  function showStreamInfo(data) {
+    const card = document.getElementById('infoCard');
+    const tag = document.getElementById('providerTag');
+    card.style.display = 'block';
+    tag.style.display = 'block';
+    tag.textContent = data.provider;
+    document.getElementById('infoFormat').textContent = data.type.toUpperCase();
+    document.getElementById('infoRawUrl').textContent = data.videoUrl;
+  }
+
+  document.getElementById('urlInput').addEventListener('keypress', e => (e.key === 'Enter' && handleStart()));
+</script>
+
+</body>
+</html>
