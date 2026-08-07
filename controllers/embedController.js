@@ -406,6 +406,16 @@ async function embedHandler(req, res, next) {
                 <svg id="pp-icon" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
             </button>
 
+            <!-- Atrasar 10s -->
+            <button class="ctrl-btn" id="backward-btn" title="Atrasar 10s">
+                <svg viewBox="0 0 24 24"><path d="M12.5 3C17.15 3 21 6.85 21 11.5S17.15 20 12.5 20c-3.74 0-6.9-2.42-8-5.8h2.09c1.01 2.25 3.3 3.8 5.91 3.8 3.53 0 6.5-2.97 6.5-6.5S17.03 5 13.5 5c-1.57 0-3.01.57-4.14 1.51L12.5 9H4.5V1l2.5 2.5C8.5 2.1 10.39 1 12.5 1zm-2.18 10.22c-.16-.36-.46-.54-.91-.54-.42 0-.71.17-.87.52-.16.35-.24.87-.24 1.57v.94c0 .73.08 1.25.24 1.59.16.33.45.5.87.5.45 0 .75-.18.91-.54.16-.36.24-.91.24-1.63v-.86c0-.68-.08-1.2-.24-1.55zm.9 3.06c0 1.08-.18 1.88-.53 2.41-.35.53-.88.8-1.59.8s-1.23-.27-1.57-.8c-.34-.53-.51-1.33-.51-2.41v-1.12c0-1.06.17-1.85.5-2.38.33-.53.85-.8 1.57-.8.72 0 1.24.27 1.58.8.34.53.52 1.33.52 2.38v1.12zm3.3-4.28H12v6h1.22v-4.73l1.3.43v-1.12l-1.46-.58z"/></svg>
+            </button>
+            
+            <!-- Adelantar 10s -->
+            <button class="ctrl-btn" id="forward-btn" title="Adelantar 10s">
+                <svg viewBox="0 0 24 24"><path d="M11.5 3C6.85 3 3 6.85 3 11.5S6.85 20 11.5 20c3.74 0 6.9-2.42 8-5.8h-2.09c-1.01 2.25-3.3 3.8-5.91 3.8-3.53 0-6.5-2.97-6.5-6.5S8.03 5 11.5 5c1.57 0 3.01.57 4.14 1.51L12.5 9h8V1l-2.5 2.5C15.5 2.1 13.61 1 11.5 1zm2.18 10.22c.16-.36.46-.54.91-.54.42 0 .71.17.87.52.16.35.24.87.24 1.57v.94c0 .73-.08 1.25-.24 1.59-.16.33-.45.5-.87.5-.45 0-.75-.18-.91-.54-.16-.36-.24-.91-.24-1.63v-.86c0-.68.08-1.2.24-1.55zm-.9 3.06c0 1.08.18 1.88.53 2.41.35.53.88.8 1.59.8s1.23-.27 1.57-.8c.34-.53.51-1.33.51-2.41v-1.12c0-1.06-.17-1.85-.5-2.38-.33-.53-.85-.8-1.57-.8-.72 0-1.24.27-1.58.8-.34.53-.52 1.33-.52 2.38v1.12zm-3.3-4.28H12v6h-1.22v-4.73l-1.3.43v-1.12l1.46-.58z"/></svg>
+            </button>
+
             <!-- Volumen -->
             <div id="volume-wrap">
                 <button class="ctrl-btn" id="mute-btn" title="Silenciar">
@@ -495,6 +505,8 @@ async function embedHandler(req, res, next) {
     const rippleIcon    = document.getElementById('ripple-icon');
     const clickArea     = document.getElementById('click-area');
     const ppBtn         = document.getElementById('playpause-btn');
+    const bwBtn         = document.getElementById('backward-btn');
+    const fwBtn         = document.getElementById('forward-btn');
     const ppIcon        = document.getElementById('pp-icon');
     const muteBtn       = document.getElementById('mute-btn');
     const volIcon       = document.getElementById('vol-icon');
@@ -627,6 +639,16 @@ async function embedHandler(req, res, next) {
         togglePlay();
     });
 
+    bwBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        video.currentTime = Math.max(0, video.currentTime - 10);
+    });
+
+    fwBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        video.currentTime = Math.min(video.duration || 0, video.currentTime + 10);
+    });
+
     video.addEventListener('play',  () => { ppIcon.innerHTML = ICON_PAUSE;  showControls(); });
     video.addEventListener('pause', () => { ppIcon.innerHTML = ICON_PLAY;   showControls(); });
 
@@ -675,8 +697,14 @@ async function embedHandler(req, res, next) {
     document.addEventListener('fullscreenchange', () => {
         if (document.fullscreenElement) {
             fsIcon.innerHTML = ICON_FS_EXIT;
+            if (screen.orientation && screen.orientation.lock) {
+                screen.orientation.lock('landscape').catch(() => {});
+            }
         } else {
             fsIcon.innerHTML = ICON_FS_ENTER;
+            if (screen.orientation && screen.orientation.unlock) {
+                screen.orientation.unlock();
+            }
         }
     });
 
