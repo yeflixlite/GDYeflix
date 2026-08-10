@@ -23,6 +23,9 @@ const IS_PROD = process.env.NODE_ENV === 'production';
 // Lista de dominios que permiten carga directa (CORS abierto sin IP-binding)
 // NOTA: Si un dominio bloquea por CORS en el navegador, NO debe estar aquí.
 const DIRECT_DOMAINS = [
+    // StreamWish: CDN con CORS abierto → segmentos directos para máxima velocidad
+    'streamwish', 'swqcdn', 'sb-cdn', 'wish', 'sfastwish', 'hgcloud', 'mwish',
+    'playnixes.com', 'hglamioz.com', 'medixiru.com', 'premilkyway', 'qrn4x28', '.sbs',
     // VOE: CORS genuinamente abierto
     'voe', 'timmaybealready.com', 'charlestoughrace.com', 'reitshof.com', 'jenniferperformer.com',
     // VidHide MIRRORS: cuando el m3u8 usa /stream/ del mirror, los segmentos
@@ -119,7 +122,8 @@ function rewriteM3u8(content, originalUrl, proxyBase, referer) {
 
       // LÓGICA DE AHORRO: ¿Debemos saltarnos el proxy para este segmento?
       const isSegment = abs.includes('.ts') || abs.includes('.m4s') || abs.includes('.mp4') || abs.includes('/seg-') || abs.includes('.woff2');
-      const canBeDirect = DIRECT_DOMAINS.some(d => abs.includes(d));
+      const isStreamwishOrVidhide = referer.includes('streamwish') || referer.includes('vidhide') || referer.includes('hgcloud');
+      const canBeDirect = DIRECT_DOMAINS.some(d => abs.includes(d)) || isStreamwishOrVidhide;
 
       if (isSegment && !PROXY_SEGMENTS && canBeDirect) {
           // Devolvemos la URL directa. Ahorramos 100% de banda en este fragmento.
