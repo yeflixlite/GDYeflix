@@ -18,7 +18,6 @@ const earvids               = require('../services/earvids');
 const vidhide               = require('../services/vidhide');
 const nupload               = require('../services/nupload');
 const generic               = require('../services/generic');
-const puppeteerExtractor    = require('../services/puppeteerExtractor');
 
 const HTTP_SERVICE_MAP = {
   streamwish,
@@ -57,6 +56,7 @@ async function extractHandler(req, res, next) {
     let method  = null;
 
     if (mode === 'puppeteer') {
+      const puppeteerExtractor = require('../services/puppeteerExtractor');
       result = await puppeteerExtractor.extract(decodedUrl);
       method = 'puppeteer';
     } else if (mode === 'http') {
@@ -69,8 +69,14 @@ async function extractHandler(req, res, next) {
         result = await service.extract(decodedUrl);
         method = 'http';
       } catch (err) {
-        result = await puppeteerExtractor.extract(decodedUrl);
-        method = 'puppeteer';
+        console.warn(`[Extract] HTTP falló para ${provider}, intentando Puppeteer...`);
+        try {
+          const puppeteerExtractor = require('../services/puppeteerExtractor');
+          result = await puppeteerExtractor.extract(decodedUrl);
+          method = 'puppeteer';
+        } catch (puppErr) {
+          throw puppErr;
+        }
       }
     }
 

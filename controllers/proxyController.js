@@ -178,7 +178,15 @@ function rewriteM3u8(content, originalUrl, proxyBase, referer) {
 }
 
 // ── MEJORA 5: Fetch con reintento ────────────────────────────
-async function fetchUpstream(url, headers, timeout) {
+async function fetchUpstream(url, headers, timeout, req) {
+    const controller = new AbortController();
+
+    if (req) {
+        req.on('close', () => {
+            controller.abort();
+        });
+    }
+
     const config = {
         headers,
         responseType: 'stream',
@@ -186,12 +194,14 @@ async function fetchUpstream(url, headers, timeout) {
         httpsAgent,
         maxRedirects: 10,
         timeout,
+        signal: controller.signal,
         validateStatus: (status) => status < 400,
     };
 
     try {
         return await axios.get(url, config);
     } catch (err) {
+        if (axios.isCancel(err)) throw err;
         // Un solo reintento automático antes de rendirse
         if (!IS_PROD) console.log(`[Proxy] ⚠️ Reintentando: ${url.substring(0, 60)}...`);
         return await axios.get(url, config);
@@ -251,7 +261,7 @@ async function proxyHandler(req, res, next) {
                       decodedUrl.includes('.mp4');
     const timeout = isM3u8Request ? 8_000 : (isSegment ? 15_000 : 20_000);
 
-    const upstream = await fetchUpstream(decodedUrl, headers, timeout);
+    const upstream = await fetchUpstream(decodedUrl, headers, timeout, req);
 
     const isM3u8 = isM3u8Request || 
                    (upstream.headers['content-type'] || '').includes('mpegurl') ||
