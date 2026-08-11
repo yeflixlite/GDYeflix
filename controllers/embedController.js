@@ -340,6 +340,46 @@ async function embedHandler(req, res, next) {
         #play-ripple.hide { transform: translate(-50%, -50%) scale(1.3); opacity: 0; }
         #play-ripple svg { width: 32px; height: 32px; fill: #fff; }
 
+        /* ── Continuar viendo ─────────────────────────────── */
+        #resume-modal {
+            position: absolute; inset: 0; z-index: 500;
+            display: none; align-items: flex-end; justify-content: center;
+            padding-bottom: 80px;
+            pointer-events: none;
+        }
+        #resume-modal.visible { display: flex; pointer-events: all; }
+        #resume-box {
+            background: rgba(18, 18, 18, 0.96);
+            backdrop-filter: blur(16px);
+            border: 1px solid rgba(255,255,255,0.12);
+            border-radius: 14px;
+            padding: 18px 24px;
+            display: flex; flex-direction: column; align-items: center; gap: 14px;
+            box-shadow: 0 12px 48px rgba(0,0,0,0.7);
+            max-width: 340px; width: 90%;
+            animation: resumeSlideUp 0.3s ease;
+        }
+        @keyframes resumeSlideUp {
+            from { opacity: 0; transform: translateY(20px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
+        #resume-text {
+            font-size: 14px; color: rgba(255,255,255,0.85);
+            text-align: center; line-height: 1.4;
+            font-family: 'Roboto', sans-serif;
+        }
+        #resume-text strong { color: #fff; }
+        #resume-btns { display: flex; gap: 10px; width: 100%; }
+        .resume-btn {
+            flex: 1; border: none; border-radius: 8px;
+            padding: 10px 14px; font-size: 13px; font-weight: 600;
+            cursor: pointer; transition: filter 0.15s;
+            font-family: 'Roboto', sans-serif;
+        }
+        .resume-btn:hover { filter: brightness(1.15); }
+        #btn-continue { background: #ff0000; color: #fff; }
+        #btn-restart  { background: rgba(255,255,255,0.12); color: rgba(255,255,255,0.85); }
+
         /* ── Logo watermark ───────────────────────────────── */
         #watermark {
             position: absolute; top: 14px; left: 16px;
@@ -363,6 +403,17 @@ async function embedHandler(req, res, next) {
         <div class="yx-logo">YEFLIX</div>
         <div class="yx-spinner-ring"></div>
         <div class="yx-loader-text">Cargando video...</div>
+    </div>
+
+    <!-- Continuar viendo -->
+    <div id="resume-modal">
+        <div id="resume-box">
+            <div id="resume-text">¿Continuar desde <strong id="resume-time">0:00</strong>?</div>
+            <div id="resume-btns">
+                <button class="resume-btn" id="btn-continue">▶ CONTINUAR</button>
+                <button class="resume-btn" id="btn-restart">↺ EMPEZAR DE NUEVO</button>
+            </div>
+        </div>
     </div>
 
     <!-- Error -->
@@ -542,6 +593,100 @@ async function embedHandler(req, res, next) {
     let hls             = null;
     let hideTimer       = null;
     let isSeeking       = false;
+
+    // ── Sistema «Continuar viendo» ─────────────────────────────
+    const PROGRESS_KEY_PREFIX = 'yx_progress_';
+    let   progressKey         = null;   // se asigna en init()
+    let   saveIntervalId      = null;
+    const SAVE_INTERVAL_MS    = 20000;  // 20 segundos
+    const MIN_PERCENT         = 0.05;   // 5%  — mínimo para mostrar modal
+    const MAX_PERCENT         = 0.95;   // 95% — considerado como completado
+
+    /** Genera una clave localStorage corta a partir de la URL del contenido */
+    function makeProgressKey(rawUrl) {
+        let h = 0;
+        for (let i = 0; i < rawUrl.length; i++) {
+            h = (Math.imul(31, h) + rawUrl.charCodeAt(i)) | 0;
+        }
+        return PROGRESS_KEY_PREFIX + Math.abs(h).toString(36);
+    }
+
+    function saveProgress() {
+        if (!progressKey || !video.duration || video.duration < 10) return;
+        try {
+            const pos  = video.currentTime;
+            const dur  = video.duration;
+            const pct  = pos / dur;
+            const entry = {
+                position : pos,
+                duration : dur,
+                completed: pct >= MAX_PERCENT,
+                updatedAt: Date.now()
+            };
+            localStorage.setItem(progressKey, JSON.stringify(entry));
+        } catch(e) { /* localStorage puede no estar disponible; el video continúa igual */ }
+    }
+
+    function loadProgress() {
+        if (!progressKey) return null;
+        try {
+            const raw = localStorage.getItem(progressKey);
+            return raw ? JSON.parse(raw) : null;
+        } catch(e) { return null; }
+    }
+
+    function startProgressTracking() {
+        if (saveIntervalId) clearInterval(saveIntervalId);
+        saveIntervalId = setInterval(saveProgress, SAVE_INTERVAL_MS);
+
+        // Guardar al pausar
+        video.addEventListener('pause', saveProgress);
+
+        // Guardar cuando termina y marcarlo como completado
+        video.addEventListener('ended', () => {
+            try {
+                if (progressKey) {
+                    const entry = { position: 0, duration: video.duration, completed: true, updatedAt: Date.now() };
+                    localStorage.setItem(progressKey, JSON.stringify(entry));
+                }
+            } catch(e) {}
+        });
+
+        // Guardar al salir de la página
+        window.addEventListener('beforeunload', saveProgress);
+    }
+
+    function stopProgressTracking() {
+        if (saveIntervalId) { clearInterval(saveIntervalId); saveIntervalId = null; }
+    }
+
+    /** Muestra el modal si hay progreso válido; devuelve true si se muestra */
+    function maybeShowResumeModal(entry) {
+        const resumeModal = document.getElementById('resume-modal');
+        const resumeTimeEl= document.getElementById('resume-time');
+        const btnContinue = document.getElementById('btn-continue');
+        const btnRestart  = document.getElementById('btn-restart');
+
+        if (!entry || entry.completed) return false;
+        const pct = entry.position / (entry.duration || 1);
+        if (pct < MIN_PERCENT || pct >= MAX_PERCENT) return false;
+
+        resumeTimeEl.textContent = fmt(entry.position);
+        resumeModal.classList.add('visible');
+
+        btnContinue.onclick = () => {
+            resumeModal.classList.remove('visible');
+            video.currentTime = entry.position;
+            video.play().catch(() => {});
+        };
+        btnRestart.onclick = () => {
+            resumeModal.classList.remove('visible');
+            video.currentTime = 0;
+            try { localStorage.removeItem(progressKey); } catch(e) {}
+            video.play().catch(() => {});
+        };
+        return true;
+    }
 
     // ── Iconos SVG ─────────────────────────────────────────────
     const ICON_PLAY    = '<path d="M8 5v14l11-7z"/>';
@@ -867,6 +1012,9 @@ async function embedHandler(req, res, next) {
     async function init() {
         const originalUrl = "${encodeURIComponent(url)}";
 
+        // Asignar clave de progreso basada en la URL del contenido
+        progressKey = makeProgressKey(decodeURIComponent(originalUrl));
+
         try {
             const minWait = new Promise(resolve => setTimeout(resolve, 9000));
 
@@ -909,6 +1057,26 @@ async function embedHandler(req, res, next) {
 
             buffering.classList.remove('visible');
             showControls();
+
+            // Iniciar seguimiento de progreso
+            startProgressTracking();
+
+            // Mostrar modal «Continuar viendo» si hay progreso guardado
+            const savedEntry = loadProgress();
+            if (savedEntry && !savedEntry.completed) {
+                const showWhenReady = () => {
+                    if (video.duration && video.duration > 10) {
+                        video.pause();
+                        maybeShowResumeModal(savedEntry);
+                    } else {
+                        video.addEventListener('loadedmetadata', () => {
+                            video.pause();
+                            maybeShowResumeModal(savedEntry);
+                        }, { once: true });
+                    }
+                };
+                showWhenReady();
+            }
 
         } catch (err) {
             loader.style.display = 'none';
