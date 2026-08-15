@@ -269,7 +269,16 @@ async function proxyHandler(req, res, next) {
             console.log(`[Proxy] ⚠️ Error 403 en VOE para ${isM3u8Request ? 'M3U8' : 'Fragmento TS'}. Iniciando re-extracción en caliente (Hot-Swap)...`);
             try {
                 const voeService = require('../services/voe');
-                const result = await voeService.extract(effectiveReferer);
+                
+                // Extraer el ID real del video de la URL del CDN si es posible
+                let extractTarget = effectiveReferer;
+                const videoIdMatch = decodedUrl.match(/\/([a-zA-Z0-9]+)_[a-zA-Z0-9,]*\.urlset\//);
+                if (videoIdMatch && videoIdMatch[1]) {
+                    extractTarget = 'https://voe.sx/e/' + videoIdMatch[1];
+                    console.log(`[Proxy] 🔍 ID de VOE detectado en la URL: ${videoIdMatch[1]}`);
+                }
+
+                const result = await voeService.extract(extractTarget);
                 
                 if (result && result.videoUrl) {
                     if (isM3u8Request) {
