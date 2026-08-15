@@ -262,25 +262,44 @@ async function proxyHandler(req, res, next) {
 
     let upstream = await fetchUpstream(decodedUrl, headers, timeout, req);
 
-    // ── RE-EXTRACCIÓN PARA VOE (ERROR 403 IP-BINDING) ──
-    if (upstream.status === 403 && isM3u8Request) {
+    // ── RE-EXTRACCIÓN PARA VOE (ERROR 403 IP-BINDING M3U8 y TS) ──
+    if (upstream.status === 403) {
         const { detectProvider } = require('../utils/urlDetector');
         if (detectProvider(effectiveReferer) === 'voe' || detectProvider(decodedUrl) === 'voe') {
-            console.log(`[Proxy] ⚠️ Error 403 en VOE. Iniciando re-extracción en caliente (IP-Binding bypass)...`);
+            console.log(`[Proxy] ⚠️ Error 403 en VOE para ${isM3u8Request ? 'M3U8' : 'Fragmento TS'}. Iniciando re-extracción en caliente (Hot-Swap)...`);
             try {
                 const voeService = require('../services/voe');
                 const result = await voeService.extract(effectiveReferer);
-                if (result && result.videoUrl && result.videoUrl !== decodedUrl) {
-                    console.log(`[Proxy] ✅ Re-extracción exitosa. Reintentando con nueva IP local...`);
-                    decodedUrl = result.videoUrl;
-                    let newOrigin = '';
-                    try { newOrigin = new URL(decodedUrl).origin; } catch {}
-                    const newHeaders = getMediaHeaders(effectiveReferer, newOrigin);
-                    
-                    upstream = await fetchUpstream(decodedUrl, newHeaders, timeout, req);
+                
+                if (result && result.videoUrl) {
+                    if (isM3u8Request) {
+                        // Es un M3U8 maestro, usamos la nueva URL entera
+                        if (result.videoUrl !== decodedUrl) {
+                            console.log(`[Proxy] ✅ Re-extracción M3U8 exitosa. Reintentando...`);
+                            decodedUrl = result.videoUrl;
+                            let newOrigin = '';
+                            try { newOrigin = new URL(decodedUrl).origin; } catch {}
+                            const newHeaders = getMediaHeaders(effectiveReferer, newOrigin);
+                            upstream = await fetchUpstream(decodedUrl, newHeaders, timeout, req);
+                        }
+                    } else if (isSegment) {
+                        // Es un fragmento TS. Hacemos HOT-SWAPPING de los tokens del query string
+                        const newMasterUrl = new URL(result.videoUrl);
+                        const oldSegmentUrl = new URL(decodedUrl);
+                        
+                        // Mantenemos la ruta del segmento viejo pero le inyectamos los tokens criptográficos nuevos
+                        oldSegmentUrl.search = newMasterUrl.search;
+                        decodedUrl = oldSegmentUrl.toString();
+                        
+                        console.log(`[Proxy] ✅ Hot-Swap de TS exitoso. Reintentando fragmento con nueva IP local...`);
+                        let newOrigin = '';
+                        try { newOrigin = new URL(decodedUrl).origin; } catch {}
+                        const newHeaders = getMediaHeaders(effectiveReferer, newOrigin);
+                        upstream = await fetchUpstream(decodedUrl, newHeaders, timeout, req);
+                    }
                 }
             } catch (retryErr) {
-                console.error(`[Proxy] ❌ Falló la re-extracción de VOE:`, retryErr.message);
+                console.error(`[Proxy] ❌ Falló el Hot-Swap de VOE:`, retryErr.message);
             }
         }
     }
