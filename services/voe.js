@@ -28,7 +28,8 @@ const VOE_DOMAINS = [
     'v-o-e.com',
     'voe-video.com',
     'richardquestionbuilding.com',
-    'jenniferperformer.com'
+    'jenniferperformer.com',
+    'nicolehappyoutside.com'
 ];
 
 /**
@@ -94,7 +95,8 @@ async function extract(url) {
         'reitshof.com',
         'richardquestionbuilding.com',
         'jenniferperformer.com',
-        'p-v-o-e.com'
+        'p-v-o-e.com',
+        'nicolehappyoutside.com'
     ];
     
     // Lista de hosts a probar

@@ -23,8 +23,7 @@ const IS_PROD = process.env.NODE_ENV === 'production';
 // Lista de dominios que permiten carga directa (CORS abierto sin IP-binding)
 // NOTA: Si un dominio bloquea por CORS en el navegador, NO debe estar aquí.
 const DIRECT_DOMAINS = [
-    // VOE: CORS genuinamente abierto
-    'voe', 'timmaybealready.com', 'charlestoughrace.com', 'reitshof.com', 'jenniferperformer.com',
+    // VOE: Eliminado temporalmente para forzar su paso por Vercel y evitar errores de CORS
     // VidHide MIRRORS: cuando el m3u8 usa /stream/ del mirror, los segmentos
     // los sirve el mismo mirror con CORS abierto (no el CDN acek/dramiyos)
     'minochinos.com', 'callistanise.com', 'vsharea.com', 'vidhidepro.com', 'vidhide.com',
@@ -195,7 +194,7 @@ async function fetchUpstream(url, headers, timeout, req) {
         maxRedirects: 10,
         timeout,
         signal: controller.signal,
-        validateStatus: (status) => status < 400,
+        validateStatus: (status) => status < 400 || status === 403,
     };
 
     try {
@@ -214,7 +213,7 @@ async function proxyHandler(req, res, next) {
 
     if (!url) return res.status(400).end();
 
-    const decodedUrl     = decodeURIComponent(url);
+    let decodedUrl       = decodeURIComponent(url);
     const decodedReferer = referer ? decodeURIComponent(referer) : '';
     
     let origin = '';
@@ -261,11 +260,39 @@ async function proxyHandler(req, res, next) {
                       decodedUrl.includes('.mp4');
     const timeout = isM3u8Request ? 8_000 : (isSegment ? 15_000 : 20_000);
 
-    const upstream = await fetchUpstream(decodedUrl, headers, timeout, req);
+    let upstream = await fetchUpstream(decodedUrl, headers, timeout, req);
+
+    // ── RE-EXTRACCIÓN PARA VOE (ERROR 403 IP-BINDING) ──
+    if (upstream.status === 403 && isM3u8Request) {
+        const { detectProvider } = require('../utils/urlDetector');
+        if (detectProvider(effectiveReferer) === 'voe' || detectProvider(decodedUrl) === 'voe') {
+            console.log(`[Proxy] ⚠️ Error 403 en VOE. Iniciando re-extracción en caliente (IP-Binding bypass)...`);
+            try {
+                const voeService = require('../services/voe');
+                const result = await voeService.extract(effectiveReferer);
+                if (result && result.videoUrl && result.videoUrl !== decodedUrl) {
+                    console.log(`[Proxy] ✅ Re-extracción exitosa. Reintentando con nueva IP local...`);
+                    decodedUrl = result.videoUrl;
+                    let newOrigin = '';
+                    try { newOrigin = new URL(decodedUrl).origin; } catch {}
+                    const newHeaders = getMediaHeaders(effectiveReferer, newOrigin);
+                    
+                    upstream = await fetchUpstream(decodedUrl, newHeaders, timeout, req);
+                }
+            } catch (retryErr) {
+                console.error(`[Proxy] ❌ Falló la re-extracción de VOE:`, retryErr.message);
+            }
+        }
+    }
 
     const isM3u8 = isM3u8Request || 
                    (upstream.headers['content-type'] || '').includes('mpegurl') ||
                    forceM3u8 === '1';
+
+    // Para VOE, si después del reintento sigue siendo 403 y enviando HTML, cortamos aquí
+    if (upstream.status === 403 && isM3u8) {
+        return res.status(403).end();
+    }
 
     res.status(upstream.status);
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -286,6 +313,13 @@ async function proxyHandler(req, res, next) {
     let body = '';
     upstream.data.on('data',  chunk => { body += chunk; });
     upstream.data.on('end',   () => {
+      
+      // ── VALIDACIÓN ESTRICTA M3U8 (Evitar parsear HTML de error) ──
+      if (!body.includes('#EXTM3U')) {
+          console.error(`[Proxy] ❌ Contenido M3U8 Inválido (Posible 403 HTML oculto).`);
+          return res.end(); // Retorna vacío en lugar de enviar basura
+      }
+
       let processed = rewriteM3u8(body, decodedUrl, '/proxy', decodedReferer);
 
       // wrapM3u8: Si el m3u8 es una playlist de un solo nivel (sin #EXT-X-STREAM-INF),
