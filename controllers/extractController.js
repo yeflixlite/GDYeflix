@@ -9,15 +9,10 @@
 
 const { detectProvider }    = require('../utils/urlDetector');
 const streamwish            = require('../services/streamwish');
-const doodstream            = require('../services/doodstream');
-const streamtape            = require('../services/streamtape');
 const filemoon              = require('../services/filemoon');
 const voe                   = require('../services/voe');
-const dailymotion           = require('../services/dailymotion');
-const earvids               = require('../services/earvids');
 const vidhide               = require('../services/vidhide');
-const nupload               = require('../services/nupload');
-const generic               = require('../services/generic');
+
 
 const HTTP_SERVICE_MAP = {
   streamwish,

@@ -95,7 +95,6 @@ async function extract(url) {
         'reitshof.com',
         'richardquestionbuilding.com',
         'jenniferperformer.com',
-        'p-v-o-e.com',
         'nicolehappyoutside.com'
     ];
     

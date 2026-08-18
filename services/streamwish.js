@@ -38,19 +38,8 @@ const CACHE_TTL = 1000 * 60 * 60;
 const STREAMWISH_DOMAINS = [
   'streamwish.com',
   'streamwish.to',
-  'embedwish.com',
-  'wishembed.net',
-  'flaswish.com',
-  'sfastwish.com',
-  'sfastwish.com',
-  'wishfast.top',
   'hgcloud.to',        // ← nuevo
   'hgcloud.net',
-  'awish.pro',
-  'dwish.pro',
-  'cilootv.store',
-  'bestx.stream',
-  'moviesapi.club',
   'hglamioz.com',
   'streamhg.com',
 ];

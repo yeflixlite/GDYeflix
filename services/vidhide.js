@@ -124,7 +124,6 @@ async function extract(url) {
         'minochinos.com',
         'callistanise.com',
         'vsharea.com',
-        'vidhidepro.com',
         'vidhide.com'
     ];
     
