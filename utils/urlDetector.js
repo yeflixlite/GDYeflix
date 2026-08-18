@@ -35,6 +35,7 @@ const PROVIDERS = {
     /hglamioz\.com/i,
     /streamhg\.com/i,
     /hgcloud\.(to|net|cc|me)/i,
+    /hglink\.to/i,
     /niramirus\.com/i,
     /audinifer\.com/i,
   ],

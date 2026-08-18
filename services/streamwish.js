@@ -38,8 +38,9 @@ const CACHE_TTL = 1000 * 60 * 60;
 const STREAMWISH_DOMAINS = [
   'streamwish.com',
   'streamwish.to',
-  'hgcloud.to',        // ← nuevo
+  'hgcloud.to',
   'hgcloud.net',
+  'hglink.to',
   'hglamioz.com',
   'streamhg.com',
 ];
