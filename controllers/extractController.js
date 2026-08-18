@@ -18,15 +18,8 @@ const HTTP_SERVICE_MAP = {
   streamwish,
   hgcloud    : streamwish,
   vidhide,
-  doodstream,
-  streamtape,
   filemoon,
   voe,
-  dailymotion,
-  earvids,
-  nupload,
-  direct     : generic,
-  unknown    : generic,
 };
 
 async function extractHandler(req, res, next) {
@@ -55,12 +48,14 @@ async function extractHandler(req, res, next) {
       result = await puppeteerExtractor.extract(decodedUrl);
       method = 'puppeteer';
     } else if (mode === 'http') {
-      const service = HTTP_SERVICE_MAP[provider] || generic;
+      const service = HTTP_SERVICE_MAP[provider];
+      if (!service) throw new Error(`Proveedor HTTP no soportado: ${provider}`);
       result = await service.extract(decodedUrl);
       method = 'http';
     } else {
-      const service = HTTP_SERVICE_MAP[provider] || generic;
+      const service = HTTP_SERVICE_MAP[provider];
       try {
+        if (!service) throw new Error(`Proveedor HTTP no soportado: ${provider}`);
         result = await service.extract(decodedUrl);
         method = 'http';
       } catch (err) {

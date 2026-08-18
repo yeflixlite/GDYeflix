@@ -19,18 +19,11 @@ function getServiceMap() {
   
   // Lazy require to avoid crashes on Vercel/Serverless
   HTTP_SERVICE_MAP = {
-    doodstream  : require('../services/doodstream'),
-    streamtape  : require('../services/streamtape'),
     streamwish  : require('../services/streamwish'),
     hgcloud     : require('../services/streamwish'),
     vidhide     : require('../services/vidhide'),
     filemoon    : require('../services/filemoon'),
     voe         : require('../services/voe'),
-    dailymotion : require('../services/dailymotion'),
-    earvids     : require('../services/earvids'),
-    nupload     : require('../services/nupload'),
-    direct      : require('../services/generic'),
-    unknown     : require('../services/generic'),
   };
   return HTTP_SERVICE_MAP;
 }
@@ -66,13 +59,15 @@ async function playHandler(req, res, next) {
       result = await puppeteerExtractor.extract(decodedUrl);
       method = 'puppeteer';
     } else if (mode === 'http') {
-      const service = serviceMap[provider] || require('../services/generic');
+      const service = serviceMap[provider];
+      if (!service) throw new Error(`Proveedor HTTP no soportado: ${provider}`);
       result = await service.extract(decodedUrl);
       method = 'http';
     } else {
       // MODO AUTO: Siempre intenta HTTP primero (1s) antes de ir a Puppeteer (15s)
       try {
-        const service = serviceMap[provider] || require('../services/generic');
+        const service = serviceMap[provider];
+        if (!service) throw new Error(`Proveedor HTTP no soportado: ${provider}`);
         result = await service.extract(decodedUrl);
         method = 'http';
       } catch (err) {
