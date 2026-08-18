@@ -29,7 +29,8 @@ const VOE_DOMAINS = [
     'voe-video.com',
     'richardquestionbuilding.com',
     'jenniferperformer.com',
-    'nicolehappyoutside.com'
+    'nicolehappyoutside.com',
+    'rebeccapracticeloss.com'
 ];
 
 /**
@@ -90,6 +91,7 @@ async function extract(url) {
 
     // Espejos limpios de VOE y nuevos dominios detectados
     const CLEAN_MIRRORS = [
+        'rebeccapracticeloss.com',   // ← activo, sin captcha
         'timmaybealready.com', 
         'charlestoughrace.com', 
         'reitshof.com',

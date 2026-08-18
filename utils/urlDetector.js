@@ -78,6 +78,7 @@ const PROVIDERS = {
     /jenniferperformer\.com/i,
     /p-v-o-e\.com/i,
     /nicolehappyoutside\.com/i,
+    /rebeccapracticeloss\.com/i,
   ],
   mp4upload: [
     /mp4upload\.com/i,
