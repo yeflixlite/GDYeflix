@@ -24,6 +24,7 @@ function getServiceMap() {
     vidhide     : require('../services/vidhide'),
     filemoon    : require('../services/filemoon'),
     voe         : require('../services/voe'),
+    nupload     : require('../services/nupload'),
   };
   return HTTP_SERVICE_MAP;
 }

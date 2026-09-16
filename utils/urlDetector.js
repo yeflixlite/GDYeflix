@@ -69,7 +69,7 @@ const PROVIDERS = {
     /goodstreamz\.com/i,
   ],
   nupload: [
-    /nupload\.me/i,
+    /nupload\.(me|top|my)/i,
   ],
   earvids: [
     /earvids\.com/i,
