@@ -837,14 +837,36 @@ async function embedHandler(req, res, next) {
     video.addEventListener('playing',  () => buffering.classList.remove('visible'));
 
     // ── Fullscreen ─────────────────────────────────────────────
+    // iOS Safari no soporta requestFullscreen() ni screen.orientation.lock(),
+    // así que para iPhone/iPad usamos el fullscreen NATIVO del <video>
+    // (webkitEnterFullscreen): solo el video pasa a landscape y la página
+    // host queda portrait. En Android/desktop se mantiene el comportamiento
+    // actual (fullscreen del wrapper + lock landscape).
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+                  (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    const supportsNativeVideoFS = typeof video.webkitEnterFullscreen === 'function';
+
     fsBtn.addEventListener('click', (e) => {
         e.stopPropagation();
+        if (isIOS && supportsNativeVideoFS) {
+            if (video.webkitDisplayingFullscreen) {
+                video.webkitExitFullscreen();
+            } else {
+                video.webkitEnterFullscreen();
+            }
+            return;
+        }
         if (!document.fullscreenElement) {
             wrap.requestFullscreen().catch(()=>{});
         } else {
             document.exitFullscreen().catch(()=>{});
         }
     });
+
+    if (supportsNativeVideoFS) {
+        video.addEventListener('webkitbeginfullscreen', () => { fsIcon.innerHTML = ICON_FS_EXIT; });
+        video.addEventListener('webkitendfullscreen',   () => { fsIcon.innerHTML = ICON_FS_ENTER; });
+    }
 
     document.addEventListener('fullscreenchange', () => {
         if (document.fullscreenElement) {
