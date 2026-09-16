@@ -366,19 +366,37 @@
     updateStatus('busy', 'Analizando proveedor y extrayendo...');
 
     try {
-      const minWait = new Promise(resolve => setTimeout(resolve, 9000));
       window.menuWaitPromise = new Promise(resolve => setTimeout(resolve, 8000));
-      
+
       const data = await fetch(`/play?url=${encodeURIComponent(url)}&mode=${currentMode}`).then(r => r.json());
       if (data.error) throw new Error(data.error);
 
       addLog("¡Éxito! Enlace extraído via " + data.method, 'sc');
       
-      // PASO 1: Empezar a cargar el video en segundo plano
-      initPlayer(data.proxyUrl, data.type, false); // false = no mostrar todavía
+      // StreamWish: si el proveedor ya entrega un HLS válido (directPlay),
+      // reproducimos su HLS directo (los segmentos NO pasan por Vercel).
+      // El proxy queda como respaldo automático si el directo bloquea por CORS.
+      const directSource = data.directPlay ? data.videoUrl : data.proxyUrl;
+      const fallbackSource = data.directPlay ? data.proxyUrl : null;
 
-      // PASO 2: Esperar a que se cumplan los 9 segundos
-      await minWait;
+      // Loader ágil: 3s mínimos de pre-buffer en segundo plano (para que
+      // hls.js detecte/descargue más TS mientras tanto). Se oculta antes
+      // si el video ya puede reproducirse, y jamás pasa del tope de 4s.
+      const videoEl = document.getElementById('player');
+      const MIN_LOADER_MS = 3000;
+      const MAX_LOADER_MS = 5000;
+      const readyPromise = new Promise((resolve) => {
+        if (videoEl.readyState >= 3) { resolve(); return; }
+        videoEl.addEventListener('canplay', () => resolve(), { once: true });
+      });
+      const minLoader = new Promise((resolve) => setTimeout(resolve, MIN_LOADER_MS));
+      const capLoader = new Promise((resolve) => setTimeout(resolve, MAX_LOADER_MS));
+
+      // PASO 1: Empezar a cargar el video en segundo plano
+      initPlayer(directSource, data.type, false, fallbackSource); // false = no mostrar todavía
+
+      // PASO 2: Esperar (3s mínimo Y video listo) o tope de 4s
+      await Promise.race([Promise.all([minLoader, readyPromise]), capLoader]);
 
       // PASO 3: Mostrar el reproductor
       document.getElementById('overlay').style.display = 'none';
@@ -396,7 +414,7 @@
     }
   }
 
-  function initPlayer(source, type, showImmediately = true) {
+  function initPlayer(source, type, showImmediately = true, fallbackUrl = null) {
     const video = document.getElementById('player');
     const overlay = document.getElementById('overlay');
     
@@ -410,6 +428,10 @@
     if (type === 'm3u8') {
       if (Hls.isSupported()) {
         if (hlsInstance) hlsInstance.destroy();
+        // Cuando probamos el HLS directo del proveedor usamos reintentos mínimos
+        // para que un fallo de CORS/403 dispare el fallback al proxy en ~1s,
+        // sin quedarse reintentando y congelando el reproductor.
+        const tryingDirect = !!fallbackUrl;
         hlsInstance = new Hls({ 
           enableWorker: true,
           lowLatencyMode: false,
@@ -417,12 +439,42 @@
           maxBufferLength: 60,
           maxMaxBufferLength: 120,
           maxBufferSize: 60 * 1024 * 1024,
-          fragLoadingTimeOut: 20000,
-          manifestLoadingTimeOut: 20000,
-          levelLoadingTimeOut: 20000,
+          fragLoadingTimeOut: tryingDirect ? 8000 : 20000,
+          manifestLoadingTimeOut: tryingDirect ? 8000 : 20000,
+          levelLoadingTimeOut: tryingDirect ? 8000 : 20000,
+          fragLoadingMaxRetry: tryingDirect ? 2 : 5,
+          manifestLoadingMaxRetry: tryingDirect ? 1 : 4,
+          levelLoadingMaxRetry: tryingDirect ? 1 : 4,
           nudgeOffset: 0.1,
           nudgeMaxRetries: 5,
         });
+
+        // Si estamos probando el HLS directo del proveedor y falla en red
+        // (CORS/403/tokens caducos) o tarda más de 6s, pasamos al proxy.
+        if (fallbackUrl) {
+          const current = hlsInstance;
+          let usedFallback = false;
+          let watchdog = setTimeout(() => {
+            if (usedFallback) return;
+            usedFallback = true;
+            addLog('El directo tardó demasiado. Pasando por proxy...', 'err');
+            if (current) current.destroy();
+            hlsInstance = null;
+            initPlayer(fallbackUrl, type, showImmediately);
+          }, 6000);
+          current.on(Hls.Events.ERROR, function(_evt, data) {
+            if (usedFallback) return;
+            if (data.fatal && data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+              usedFallback = true;
+              clearTimeout(watchdog);
+              addLog('HLS directo no disponible (' + (data.details || 'networkError') + '). Pasando por proxy...', 'err');
+              if (current) current.destroy();
+              hlsInstance = null;
+              initPlayer(fallbackUrl, type, showImmediately);
+            }
+          });
+        }
+
         hlsInstance.loadSource(source);
         hlsInstance.attachMedia(video);
         hlsInstance.on(Hls.Events.MANIFEST_PARSED, () => {
@@ -436,6 +488,12 @@
         hlsInstance.on(Hls.Events.AUDIO_TRACKS_UPDATED, updateAudioMenu);
       } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
         video.src = source;
+        if (fallbackUrl) {
+          video.addEventListener('error', function onNativeErr() {
+            video.removeEventListener('error', onNativeErr);
+            video.src = fallbackUrl;
+          }, { once: true });
+        }
         if (showImmediately) video.play();
       }
     } else {

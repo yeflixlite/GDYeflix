@@ -2,7 +2,7 @@
  * ============================================================
  *  services/vidhide.js
  *  Extrae el enlace HLS (m3u8 / .txt) de VidHide y sus clones
- *  como minochinos.com, vsharea.com, etc.
+ *  como morencius.com, minochinos.com, callistanise.com, etc.
  * ============================================================
  */
 
@@ -81,13 +81,17 @@ function tryUnpack(js, baseOrigin) {
                 if (k[c]) p = p.replace(new RegExp('\\b' + eFunc(c) + '\\b', 'g'), k[c]);
             }
             
-            // Prioridad 1: URL relativa /stream/ (local, sin expiración)
-            const relStreamMatch = p.match(/["'](\/stream\/[^"'\\]+\.m3u8[^"'\\]*)["']/i);
-            if (relStreamMatch && baseOrigin) return baseOrigin + relStreamMatch[1];
-
-            // Prioridad 2: URL absoluta m3u8
+            // Prioridad 1: URL absoluta m3u8 del CDN (ej. dramiyos-cdn.com).
+            // Este CDN responde con Access-Control-Allow-Origin: * y sin exigencia
+            // de referer, así que el reproductor puede consumirlo DESDE EL NAVEGADOR
+            // (directPlay) y sus segmentos NO pasan por el proxy.
             const urlMatch = p.match(/https?:\/\/[^\s"'<>\\]+\.m3u8[^\s"'<>\\]*/i);
             if (urlMatch) return urlMatch[0];
+
+            // Prioridad 2: URL relativa /stream/ (local del espejo, sin expiración).
+            // Solo como respaldo: el CDN absoluto no siempre aparece en todos los espejos.
+            const relStreamMatch = p.match(/["'](\/stream\/[^"'\\]+\.m3u8[^"'\\]*)["']/i);
+            if (relStreamMatch && baseOrigin) return baseOrigin + relStreamMatch[1];
         }
     } catch(e) {}
     return null;
@@ -121,6 +125,7 @@ async function extract(url) {
 
     // Espejos limpios de VidHide
     const CLEAN_MIRRORS = [
+        'morencius.com',
         'minochinos.com',
         'callistanise.com',
         'vsharea.com',

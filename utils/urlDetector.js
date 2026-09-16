@@ -52,6 +52,7 @@ const PROVIDERS = {
     /vsharea\.com/i,
     /minochinos\.com/i,
     /callistanise\.com/i,
+    /morencius\.com/i,
   ],
   filemoon: [
     /filemoon\.(sx|com|to)/i,
@@ -61,6 +62,12 @@ const PROVIDERS = {
     /bysesukior\.com/i,
     /398fitus\.com/i,
   ],
+  goodstream: [
+    /goodstream\.(one|pro|cc)/i,
+    /gdstream\.xyz/i,
+    /gd-stream\.com/i,
+    /goodstreamz\.com/i,
+  ],
   nupload: [
     /nupload\.me/i,
   ],
@@ -69,6 +76,7 @@ const PROVIDERS = {
   ],
   voe: [
     /voe\.sx/i,
+    /johnfullwonder\.com/i,
     /charlestoughrace\.com/i,
     /reitshof\.com/i,
     /v-o-e\.com/i,

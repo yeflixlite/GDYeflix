@@ -23,7 +23,13 @@ const IS_PROD = process.env.NODE_ENV === 'production';
 // Lista de dominios que permiten carga directa (CORS abierto sin IP-binding)
 // NOTA: Si un dominio bloquea por CORS en el navegador, NO debe estar aquí.
 const DIRECT_DOMAINS = [
-    // VOE: Eliminado temporalmente para forzar su paso por Vercel y evitar errores de CORS
+    // VOE CDN: *.cloudwindow-route.com responde Access-Control-Allow-Origin: *
+    // en master, variante y segmentos (sin exigencia de referer) → se puede
+    // saltar el proxy. Verificado con /play de voe.sx en flujo real.
+    'cloudwindow-route.com',
+    // Filemoon CDN: *.r66nv9ed.com responde ACAO: * en master/variante/segmentos
+    // sin cifrado EXT-X-KEY → se puede saltar el proxy.
+    'r66nv9ed.com',
     // VidHide MIRRORS: cuando el m3u8 usa /stream/ del mirror, los segmentos
     // los sirve el mismo mirror con CORS abierto (no el CDN acek/dramiyos)
     'minochinos.com', 'callistanise.com', 'vsharea.com', 'vidhidepro.com', 'vidhide.com',

@@ -23,12 +23,10 @@ const CACHE_TTL = 1000 * 60 * 60;
 /* ── Dominios reconocidos de VOE ────────── */
 const VOE_DOMAINS = [
     'voe.sx',
+    'johnfullwonder.com',
     'charlestoughrace.com',
-    'reitshof.com',
-    'v-o-e.com',
-    'voe-video.com',
+    'timmaybealready.com',
     'richardquestionbuilding.com',
-    'jenniferperformer.com',
     'nicolehappyoutside.com',
     'rebeccapracticeloss.com'
 ];
@@ -89,15 +87,15 @@ async function extract(url) {
         return cached.result;
     }
 
-    // Espejos limpios de VOE y nuevos dominios detectados
+    // Espejos limpios de VOE (eliminados los que tienen DNS muerto o llevan
+    // a captcha: reitshof.com, v-o-e.com, voe-video.com, jenniferperformer.com, p-v-o-e.com)
     const CLEAN_MIRRORS = [
-        'rebeccapracticeloss.com',   // ← activo, sin captcha
-        'timmaybealready.com', 
-        'charlestoughrace.com', 
-        'reitshof.com',
+        'johnfullwonder.com',    // ← host actual (destino del redirect de voe.sx)
+        'charlestoughrace.com',
+        'timmaybealready.com',
         'richardquestionbuilding.com',
-        'jenniferperformer.com',
-        'nicolehappyoutside.com'
+        'nicolehappyoutside.com',
+        'rebeccapracticeloss.com'
     ];
     
     // Lista de hosts a probar

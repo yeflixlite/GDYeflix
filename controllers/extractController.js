@@ -12,6 +12,7 @@ const streamwish            = require('../services/streamwish');
 const filemoon              = require('../services/filemoon');
 const voe                   = require('../services/voe');
 const vidhide               = require('../services/vidhide');
+const goodstream            = require('../services/goodstream');
 
 
 const HTTP_SERVICE_MAP = {
@@ -20,6 +21,7 @@ const HTTP_SERVICE_MAP = {
   vidhide,
   filemoon,
   voe,
+  goodstream,
 };
 
 async function extractHandler(req, res, next) {
