@@ -23,10 +23,10 @@ const IS_PROD = process.env.NODE_ENV === 'production';
 // Lista de dominios que permiten carga directa (CORS abierto sin IP-binding)
 // NOTA: Si un dominio bloquea por CORS en el navegador, NO debe estar aquí.
 const DIRECT_DOMAINS = [
-    // VOE CDN: *.cloudwindow-route.com responde Access-Control-Allow-Origin: *
-    // en master, variante y segmentos (sin exigencia de referer) → se puede
-    // saltar el proxy. Verificado con /play de voe.sx en flujo real.
-    'cloudwindow-route.com',
+    // NOTA: VOE (*.cloudwindow-route.com) fue RETIRADO de esta lista (16/09/2026):
+    // el CDN ya no envía Access-Control-Allow-Origin desde el navegador y los
+    // tokens quedan ligados a la IP del servidor (403/CORS en directo). El
+    // tráfico VOE DEBE pasar por el proxy (hot-swap incluido).
     // Filemoon CDN: *.r66nv9ed.com responde ACAO: * en master/variante/segmentos
     // sin cifrado EXT-X-KEY → se puede saltar el proxy.
     'r66nv9ed.com',

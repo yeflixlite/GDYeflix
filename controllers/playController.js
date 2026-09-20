@@ -102,22 +102,24 @@ async function playHandler(req, res, next) {
     
     let proxyUrl = `/proxy?url=${encodedVideoUrl}&referer=${encodedReferer}${isHlsTxt ? '&forceM3u8=1' : ''}${wrapParam}`;
 
-    // ÓPTIMO DE BANDA (StreamWish / VidHide / VOE / Filemoon): el proveedor ya
+    // ÓPTIMO DE BANDA (StreamWish / VidHide / Filemoon): el proveedor ya
     // entrega un HLS/m3u8 completo y reproducible, así que el reproductor puede
     // consumir ese HLS DIRECTAMENTE desde el CDN del proveedor (sus segmentos NO
     // pasan por Vercel, Data Transfer ≈ 0). El proxy solo se usa como respaldo si
     // el navegador bloquea el directo (CORS/403/tokens).
     //
+    // VOE excluido (16/09/2026): su CDN *.cloudwindow-route.com ya NO responde
+    // Access-Control-Allow-Origin desde el navegador y los tokens quedan ligados
+    // a la IP del servidor → 403/CORS en directo. Todo el tráfico VOE pasa por
+    // /proxy (con hot-swap en caso de 403).
+    //
     // VidHide: m3u8 absoluto de dramiyos-cdn.com (ACAO: * y sin exigencia de
     // referer) → directo OK.
-    // VOE: m3u8 de *.cloudwindow-route.com (ACAO: * en master/variante/segmento,
-    // acepta cualquier referer) → directo OK.
     // Filemoon: m3u8 de *.r66nv9ed.com (ACAO: * en master/variante/segmento,
     // sin cifrado EXT-X-KEY) → directo OK.
     const directPlay =
       (provider === 'streamwish' || provider === 'hgcloud' ||
-       provider === 'vidhide'    || provider === 'voe' ||
-       provider === 'filemoon') &&
+       provider === 'vidhide'    || provider === 'filemoon') &&
       result.type === 'm3u8';
 
     // ── FIN DE LÓGICA INLINE BYPASS (REMOVIDO POR CORS/RELATIVE_PATH ISSUES) ──
