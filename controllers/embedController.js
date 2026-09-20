@@ -23,6 +23,13 @@ async function embedHandler(req, res, next) {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Yeflix · Reproductor</title>
     <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+    <script src="https://www.gstatic.com/cv/js/sender/{1}/cast_sender.js"></script>
+    <script>
+        // Stub: el SDK de Cast llama a esta función cuando termina de cargar.
+        window.__onGCastApiAvailable = function (isAvailable) {
+            window.__castReady = isAvailable;
+        };
+    </script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
     <style>
@@ -392,6 +399,17 @@ async function embedHandler(req, res, next) {
         }
         #player-wrap.controls-visible #watermark { opacity: 1; }
 
+        /* ── Botón Chromecast (se muestra solo si hay SDK disponible) ── */
+        #cast-btn {
+            display: none;
+            align-items: center;
+            justify-content: center;
+        }
+        #cast-btn.cast-available { display: flex; }
+        #cast-btn svg path { fill: currentColor; }
+        #cast-btn.cast-connected svg path { fill: #ff0000; }
+        #cast-btn { color: rgba(255,255,255,0.9); }
+
     </style>
 </head>
 <body>
@@ -491,6 +509,13 @@ async function embedHandler(req, res, next) {
 
             <div class="spacer"></div>
 
+            <!-- Transmitir (Chromecast) -->
+            <button class="ctrl-btn" id="cast-btn" title="Transmitir en TV (Chromecast)">
+                <svg viewBox="0 0 24 24">
+                    <path d="M1 18v3h3c0-1.66-1.34-3-3-3zm0-4v2c2.76 0 5 2.24 5 5h2c0-3.87-3.13-7-7-7zm0-4v2c4.97 0 9 4.03 9 9h2c0-6.08-4.92-11-11-11zm20-7H3c-1.1 0-2 .9-2 2v3h2V5h18v14h-7v2h7c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z"/>
+                </svg>
+            </button>
+
             <!-- Ajustes -->
             <div style="position:relative">
                 <button class="ctrl-btn" id="settings-btn" title="Ajustes">
@@ -577,6 +602,7 @@ async function embedHandler(req, res, next) {
     const settingsPanel = document.getElementById('settings-panel');
     const fsBtn         = document.getElementById('fullscreen-btn');
     const fsIcon        = document.getElementById('fs-icon');
+    const castBtn       = document.getElementById('cast-btn');
     const menuQuality   = document.getElementById('menu-quality');
     const menuAudio     = document.getElementById('menu-audio');
     const qualityCurrent= document.getElementById('quality-current');
@@ -882,6 +908,77 @@ async function embedHandler(req, res, next) {
         }
     });
 
+    // ── Chromecast (Cast SDK) ───────────────────────────────────
+    // La URL del cast SIEMPRE es la del proxy (absoluta y pública):
+    // el Chromecast es otro dispositivo y no puede usar rutas relativas
+    // ni los CDNs directos con tokens ligados a la IP del servidor.
+    let lastCastMediaUrl = '';
+
+    function buildCastUrl() {
+        if (!lastCastMediaUrl) return '';
+        try { return new URL(lastCastMediaUrl, location.origin).href; } catch (e) { return ''; }
+    }
+
+    function initCast() {
+        if (typeof window.cast === 'undefined' ||
+            typeof window.cast.framework === 'undefined' ||
+            typeof window.chrome === 'undefined' ||
+            !window.chrome.cast) return;
+        try {
+            const castContext = cast.framework.CastContext.getInstance();
+            castContext.setOptions({
+                receiverApplicationId: chrome.cast.media.DEFAULT_MEDIA_RECEIVER_APP_ID,
+                autoJoinPolicy: chrome.cast.AutoJoinPolicy.ORIGIN_SCOPED
+            });
+
+            castBtn.classList.add('cast-available');
+
+            castBtn.addEventListener('click', () => {
+                const session = castContext.getCurrentSession();
+                if (session) {
+                    castContext.endCurrentSession(true);
+                    return;
+                }
+                const castUrl = buildCastUrl();
+                if (!castUrl) return;
+                const mediaInfo = new chrome.cast.media.MediaInfo(castUrl, 'application/x-mpegURL');
+                mediaInfo.metadata = new chrome.cast.media.GenericMediaMetadata();
+                mediaInfo.metadata.title = document.title;
+                mediaInfo.streamType = chrome.cast.media.StreamType.LIVE;
+                const request = new chrome.cast.media.LoadRequest(mediaInfo);
+                castContext.requestSession()
+                    .then(() => {
+                        return castContext.getCurrentSession().loadMedia(request);
+                    })
+                    .catch((err) => {
+                        console.error('[Cast] Error al transmitir:', err);
+                    });
+            });
+
+            castContext.addEventListener(cast.framework.CastContextEventType.CAST_STATE_CHANGED, (event) => {
+                if (event.castState === cast.framework.CastState.CONNECTED) {
+                    castBtn.classList.add('cast-connected');
+                    castBtn.title = 'Detener transmisión';
+                    video.pause();
+                } else {
+                    castBtn.classList.remove('cast-connected');
+                    castBtn.title = 'Transmitir en TV (Chromecast)';
+                }
+            });
+        } catch (err) {
+            console.error('[Cast] Error de inicialización:', err);
+        }
+    }
+
+    // Inicializa si el SDK ya cargó; si no, reintenta en 2.5s (carga asíncrona).
+    if (window.__castReady || (window.cast && window.cast.framework)) {
+        initCast();
+    } else {
+        setTimeout(() => {
+            if (window.cast && window.cast.framework) initCast();
+        }, 2500);
+    }
+
     // ── Teclado ────────────────────────────────────────────────
     document.addEventListener('keydown', (e) => {
         if (e.target.tagName === 'INPUT') return;
@@ -1125,6 +1222,12 @@ async function embedHandler(req, res, next) {
             // El proxy queda como respaldo automático si el directo bloquea por CORS.
             const useDirect = data.directPlay && data.videoUrl;
             startStreaming(useDirect ? data.videoUrl : finalUrl, data.type, useDirect ? finalUrl : null);
+
+            // Guardar URL pública para Chromecast (siempre el proxy: relativo → absoluto)
+            if (finalUrl && !finalUrl.startsWith('blob:') && !finalUrl.startsWith('data:')) {
+                lastCastMediaUrl = finalUrl;
+                castBtn.classList.add('cast-available');
+            }
 
             // Esperar: (3s mínimo Y video listo) o tope de 4s
             await Promise.race([Promise.all([minLoader, readyPromise]), capLoader]);
