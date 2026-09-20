@@ -23,13 +23,11 @@ async function embedHandler(req, res, next) {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Yeflix · Reproductor</title>
     <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
-    <script src="https://www.gstatic.com/cv/js/sender/{1}/cast_sender.js"></script>
     <script>
         // Stub: el SDK de Cast llama a esta función cuando termina de cargar.
-        window.__onGCastApiAvailable = function (isAvailable) {
-            window.__castReady = isAvailable;
-        };
+        window.__onGCastApiAvailable = function (isAvailable) { window.__castReady = isAvailable; };
     </script>
+    <script src="https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
     <style>
@@ -970,13 +968,16 @@ async function embedHandler(req, res, next) {
         }
     }
 
-    // Inicializa si el SDK ya cargó; si no, reintenta en 2.5s (carga asíncrona).
+    // Inicializa si el SDK ya cargó; si no, hace polling hasta que aparezca (carga asíncrona).
     if (window.__castReady || (window.cast && window.cast.framework)) {
         initCast();
     } else {
-        setTimeout(() => {
-            if (window.cast && window.cast.framework) initCast();
-        }, 2500);
+        const castPoll = setInterval(() => {
+            if (window.__castReady || (window.cast && window.cast.framework)) {
+                clearInterval(castPoll);
+                initCast();
+            }
+        }, 400);
     }
 
     // ── Teclado ────────────────────────────────────────────────
@@ -1224,9 +1225,9 @@ async function embedHandler(req, res, next) {
             startStreaming(useDirect ? data.videoUrl : finalUrl, data.type, useDirect ? finalUrl : null);
 
             // Guardar URL pública para Chromecast (siempre el proxy: relativo → absoluto)
+            // El botón solo se muestra si el SDK de Cast se inicializó (initCast).
             if (finalUrl && !finalUrl.startsWith('blob:') && !finalUrl.startsWith('data:')) {
                 lastCastMediaUrl = finalUrl;
-                castBtn.classList.add('cast-available');
             }
 
             // Esperar: (3s mínimo Y video listo) o tope de 4s
