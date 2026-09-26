@@ -15,7 +15,8 @@ const TV_SERVICES = {
     'espn2': () => require('../services/envivos/espn2'),
     'tudn' : () => require('../services/envivos/tudn'),
     'tycsports' : () => require('../services/envivos/tycsports'),
-    'telemundo' : () => require('../services/envivos/telemundo')
+    'telemundo' : () => require('../services/envivos/telemundo'),
+    'fox2' : () => require('../services/envivos/fox2')
 };
 
 /**
