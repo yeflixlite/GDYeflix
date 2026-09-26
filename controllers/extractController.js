@@ -8,6 +8,7 @@
 'use strict';
 
 const { detectProvider }    = require('../utils/urlDetector');
+const { tryExpandShortcut } = require('../utils/shortcut');
 const streamwish            = require('../services/streamwish');
 const filemoon              = require('../services/filemoon');
 const voe                   = require('../services/voe');
@@ -39,7 +40,12 @@ async function extractHandler(req, res, next) {
       decodedUrl = decodeURIComponent(url);
       new URL(decodedUrl);
     } catch {
-      return res.status(400).json({ ok: false, error: 'La URL proporcionada no es válida.' });
+      // Atajo "proveedor=ID" (ej. streamwish=abc123, vidhide=xyz789)
+      const expanded = tryExpandShortcut(decodeURIComponent(url));
+      if (!expanded) {
+        return res.status(400).json({ ok: false, error: 'La URL proporcionada no es válida.' });
+      }
+      decodedUrl = expanded;
     }
 
     const provider = detectProvider(decodedUrl);

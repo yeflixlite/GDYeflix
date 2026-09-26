@@ -10,6 +10,7 @@
 'use strict';
 
 const { detectProvider }   = require('../utils/urlDetector');
+const { tryExpandShortcut } = require('../utils/shortcut');
 
 /** Mapa proveedor → servicio HTTP (Lazy loaded inside handler) */
 let HTTP_SERVICE_MAP = null;
@@ -43,7 +44,12 @@ async function playHandler(req, res, next) {
       decodedUrl = decodeURIComponent(url);
       new URL(decodedUrl);
     } catch {
-      return res.status(400).json({ error: 'La URL proporcionada no es válida.' });
+      // Atajo "proveedor=ID" (ej. streamwish=abc123, vidhide=xyz789)
+      const expanded = tryExpandShortcut(decodeURIComponent(url));
+      if (!expanded) {
+        return res.status(400).json({ error: 'La URL proporcionada no es válida.' });
+      }
+      decodedUrl = expanded;
     }
 
     const serviceMap = getServiceMap();
