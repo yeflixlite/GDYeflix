@@ -11,11 +11,17 @@
  *  (el contenido sigue siendo una playlist HLS válida).
  *
  *  Estrategias en orden de prioridad:
+ *   0. links.hls2 / links.hls3 → CDN real (premilkyway.com / *.cyou) que sirve
+ *      el contenido auténtico. Verificado: responde a nuestro servidor solo con
+ *      Referer: https://streamwish.to/ (sin cookies). Se valida que el master
+ *      devuelva #EXTM3U antes de aceptarlo (los nodos caídos hacen fallback).
  *   1. Patrón jwplayer  → jwplayer().setup({sources:[{file:"..."}]})
  *   2. Patrón file:     → file:"https://...m3u8" / file:"...master.txt"
  *   3. Función eval()   → código JS ofuscado con atob/eval
  *   4. Patrón sources[] → sources:[{file:"..."}]
  *   5. Any https .txt   → URL que contenga /hls/ o master
+ *   6. links.hls4       → fallback: /stream/ del propio espejo (puede entregar
+ *      variantes SOLO-ANUNCIOS; se usa solo si el CDN real no responde)
  */
 
 'use strict';
@@ -78,6 +84,62 @@ function guessType(url) {
   return isHlsUrl(url) ? 'm3u8' : 'mp4';
 }
 
+/* ── P.A.C.K.E.R decode compartido ─────────────────────────── */
+const PACKER_RE = /eval\(function\(p,a,c,k,e,d\).*?\}\s*\(\s*['"](.*?)['"]\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*['"](.*?)['"]\.split\(['"]\|['"]\)/s;
+
+function decodePacker(js) {
+  const match = js.match(PACKER_RE);
+  if (!match) return null;
+  try {
+    let [_, payload, base, count, dict] = match;
+    base = parseInt(base);
+    count = parseInt(count);
+    const dictArr = dict.split('|');
+
+    const dec = (c) => {
+      return (c < base ? '' : dec(parseInt(c / base))) + ((c % base) > 35 ? String.fromCharCode((c % base) + 29) : (c % base).toString(36));
+    };
+
+    while (count--) {
+      if (dictArr[count]) {
+        const regex = new RegExp('\\b' + dec(count) + '\\b', 'g');
+        payload = payload.replace(regex, dictArr[count]);
+      }
+    }
+    return payload;
+  } catch (err) {
+    return null;
+  }
+}
+
+/**
+ * Extrae el objeto `links` (hls2/hls3/hls4) y las cookies (file_id, aff,
+ * ref_url) que StreamWish setea en la página. hls2/hls3 apuntan al CDN real
+ * (premilkyway.com / *.cyou) que sirve el contenido auténtico con solo
+ * Referer: https://streamwish.to/; hls4 es la ruta /stream/ del espejo
+ * (fallback, puede responder variantes solo-anuncios).
+ */
+function parsePackerLinks(js) {
+  const cookiePairs = [];
+  for (const m of js.matchAll(/\$\.cookie\s*\(\s*['"]([^'"]+)['"]\s*,\s*['"]([^'"]*)['"]/g)) {
+    const k = m[1].trim();
+    if (k && !cookiePairs.some(p => p.startsWith(k + '='))) cookiePairs.push(`${k}=${m[2]}`);
+  }
+  const cookies = cookiePairs.join('; ');
+
+  const links = {};
+  const decoded = decodePacker(js);
+  if (decoded) {
+    const lm = decoded.match(/links\s*=\s*\{([\s\S]*?)\};/s);
+    if (lm) {
+      for (const mm of lm[1].matchAll(/"([a-zA-Z0-9]+)"\s*:\s*"([^"]*)"/g)) {
+        if (mm[1] && !links[mm[1]]) links[mm[1]] = mm[2];
+      }
+    }
+  }
+  return { links, cookies };
+}
+
 /**
  * Intenta decodificar strings base64 anidados en el JS
  * (patrón común en páginas que ofuscan con eval(atob(...)))
@@ -98,31 +160,11 @@ function tryDecodeEval(js) {
 
   // 2. Intentar P.A.C.K.E.R (Dean Edwards)
   // eval(function(p,a,c,k,e,d){...}('payload', base, count, 'dict'.split('|')))
-  const packerMatch = js.match(/eval\(function\(p,a,c,k,e,d\).*?\}\s*\(\s*['"](.*?)['"]\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*['"](.*?)['"]\.split\(['"]\|['"]\)/s);
+  const decodedPacker = decodePacker(js);
   
-  if (packerMatch) {
-    try {
-      let [_, p, a, c, k] = packerMatch;
-      a = parseInt(a);
-      c = parseInt(c);
-      k = k.split('|');
-      
-      const e = (c) => {
-        return (c < a ? '' : e(parseInt(c / a))) + ((c % a) > 35 ? String.fromCharCode((c % a) + 29) : (c % a).toString(36));
-      };
-
-      while (c--) {
-        if (k[c]) {
-          const regex = new RegExp('\\b' + e(c) + '\\b', 'g');
-          p = p.replace(regex, k[c]);
-        }
-      }
-      
-      const urlMatch = p.match(/https?:\/\/[^\s"'<>]+(?:\.m3u8|master\.txt|playlist\.txt|\/hls\/)[^\s"'<>]*/i);
-      if (urlMatch) return urlMatch[0];
-    } catch (err) {
-      console.log('[StreamWish] Error al desempaquetar Packer:', err.message);
-    }
+  if (decodedPacker) {
+    const urlMatch = decodedPacker.match(/https?:\/\/[^\s"'<>]+(?:\.m3u8|master\.txt|playlist\.txt|\/hls\/)[^\s"'<>]*/i);
+    if (urlMatch) return urlMatch[0];
   }
 
   return null;
@@ -148,15 +190,17 @@ function extractScripts(html) {
  * @param {string} url  URL de la página embed de StreamWish/HGCloud
  * @returns {Promise<{ videoUrl: string, type: 'm3u8'|'mp4', referer: string }>}
  */
-async function extract(url) {
+async function extract(url, forceFresh = false) {
   let embedUrl = normalizeUrl(url);
   let u = new URL(embedUrl);
   const id = u.pathname.split('/').filter(Boolean).pop();
 
-  // CHECK CACHE
+  // CHECK CACHE (se omite cuando el proxy hace hot-swap y necesita una URL fresca)
   const cacheKey = id + u.search;
   const cached = extractionCache.get(cacheKey);
-  if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+  if (forceFresh) {
+    extractionCache.delete(cacheKey);
+  } else if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
     console.log(`[StreamWish] ⚡ Resultado obtenido de CACHE en memoria para ID: ${id}`);
     return cached.result;
   }
@@ -222,6 +266,44 @@ async function extract(url) {
   const search = u.search;
   
   console.log(`[StreamWish/${hostToLog}] 📄 HTML obtenido (${html.length} bytes), analizando...`);
+
+  /* ── Estrategia 0: links.hls2 / links.hls3 (CDN real) ────── */
+  // El objeto `links` del packer trae los CDN auténticos: hls2 (premilkyway.com)
+  // y hls3 (bestonlinecourses.cyou y similares). Estos responden a nuestro
+  // servidor únicamente con Referer: https://streamwish.to/ (la cookie no es
+  // necesaria: los tokens t/s/e ya van en la URL). Como algunos nodos están
+  // caídos, VALIDAMOS el master (#EXTM3U) antes de aceptar y si falla pasamos
+  // al siguiente CDN; al final queda el fallback hls4 del espejo.
+  const { links, cookies } = parsePackerLinks(scripts);
+  for (const key of ['hls2', 'hls3']) {
+    if (!links[key]) continue;
+    const raw = links[key].trim();
+    const cdn = raw.startsWith('http') ? raw : `https://${hostToLog}${raw.startsWith('/') ? '' : '/'}${raw}`;
+    if (!/[.]m3u8|master[.]txt|playlist[.]txt|\/hls\//i.test(cdn)) {
+      console.log(`[StreamWish/${hostToLog}] ⏭️ ${key} no es HLS (${cdn.substring(0, 60)}...).`);
+      continue;
+    }
+    try {
+      const probe = await fetchWithRetry(cdn, {
+        referer: origin,
+        origin: origin,
+        timeout: 2500,
+        httpsAgent,
+        httpAgent,
+      }, 1);
+      const probeBody = String(probe.data || '');
+      if (!probeBody.includes('#EXTM3U')) {
+        console.log(`[StreamWish/${hostToLog}] ⏭️ ${key} respondió pero sin #EXTM3U; probando siguiente.`);
+        continue;
+      }
+      console.log(`[StreamWish/${hostToLog}] ✅ Estrategia 0 (links.${key} CDN real, master validado) → ${cdn.substring(0, 80)}`);
+      const result = { videoUrl: cdn, type: 'm3u8', referer: origin, cookie: '' };
+      extractionCache.set(cacheKey, { timestamp: Date.now(), result });
+      return result;
+    } catch (e) {
+      console.log(`[StreamWish/${hostToLog}] ⏭️ links.${key} no responde (nodo caído): ${e.message || e.code}.`);
+    }
+  }
 
   /* ── Estrategia 1: jwplayer setup  ─────────────────────── */
   // jwplayer("player").setup({sources:[{file:"..."}]})
@@ -313,6 +395,24 @@ async function extract(url) {
     const result = { videoUrl, type: 'm3u8', referer: origin };
     extractionCache.set(cacheKey, { timestamp: Date.now(), result });
     return result;
+  }
+
+  /* ── Fallback: links.hls4 del espejo (/stream/) ────────── */
+  // Último recurso: la ruta /stream/ DEL MISMO ESPEJO que resolvió la página.
+  // Requiere las cookies (file_id, aff, ref_url) y el referer del espejo, y su
+  // variante puede llegar SOLO-ANUNCIOS; solo se usa si el CDN real no sirvió.
+  if (links.hls4) {
+    const rawH4 = links.hls4.trim();
+    const h4 = rawH4.startsWith('http')
+      ? rawH4
+      : `https://${hostToLog}${rawH4.startsWith('/') ? '' : '/'}${rawH4}`;
+    if (/\.m3u8/i.test(h4)) {
+      console.log(`[StreamWish/${hostToLog}] ⚠️ Fallback (links.hls4 /stream/ del espejo) → ${h4.substring(0, 80)}`);
+      const cookieStr = cookies || '';
+      const result = { videoUrl: h4, type: 'm3u8', referer: `https://${hostToLog}/`, cookie: cookieStr };
+      extractionCache.set(cacheKey, { timestamp: Date.now(), result });
+      return result;
+    }
   }
 
   /* ── No encontrado ─────────────────────────────────────── */

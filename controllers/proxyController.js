@@ -107,8 +107,10 @@ function resolveUrl(target, base) {
   return resolved.toString();
 }
 
-function rewriteM3u8(content, originalUrl, proxyBase, referer) {
+function rewriteM3u8(content, originalUrl, proxyBase, referer, cookie, embedUrl = '') {
   const encodedReferer = encodeURIComponent(referer || '');
+  const encodedCookie  = cookie ? `&cookie=${encodeURIComponent(cookie)}` : '';
+  const encodedEmbed   = embedUrl ? `&embed_url=${encodeURIComponent(embedUrl)}` : '';
   
   // 1. Líneas de segmentos
   let rewritten = content.replace(
@@ -131,7 +133,7 @@ function rewriteM3u8(content, originalUrl, proxyBase, referer) {
           return abs;
       }
       
-      return `${proxyBase}?url=${encodeURIComponent(abs)}&referer=${encodedReferer}`;
+      return `${proxyBase}?url=${encodeURIComponent(abs)}&referer=${encodedReferer}${encodedCookie}${encodedEmbed}`;
     }
   );
 
@@ -140,7 +142,7 @@ function rewriteM3u8(content, originalUrl, proxyBase, referer) {
     /URI=["']([^"']+)["']/g,
     (match, captured) => {
       const abs = resolveUrl(captured, originalUrl);
-      return `URI="${proxyBase}?url=${encodeURIComponent(abs)}&referer=${encodedReferer}&forceM3u8=1"`;
+      return `URI="${proxyBase}?url=${encodeURIComponent(abs)}&referer=${encodedReferer}${encodedCookie}${encodedEmbed}&forceM3u8=1"`;
     }
   );
 
@@ -183,7 +185,7 @@ function rewriteM3u8(content, originalUrl, proxyBase, referer) {
 }
 
 // ── MEJORA 5: Fetch con reintento ────────────────────────────
-async function fetchUpstream(url, headers, timeout, req) {
+async function fetchUpstream(url, headers, timeout, req, retries = 1, retryDelayMs = 0) {
     const controller = new AbortController();
 
     if (req) {
@@ -203,24 +205,63 @@ async function fetchUpstream(url, headers, timeout, req) {
         validateStatus: (status) => status < 400 || status === 403,
     };
 
-    try {
-        return await axios.get(url, config);
-    } catch (err) {
-        if (axios.isCancel(err)) throw err;
-        // Un solo reintento automático antes de rendirse
-        if (!IS_PROD) console.log(`[Proxy] ⚠️ Reintentando: ${url.substring(0, 60)}...`);
-        return await axios.get(url, config);
+    let lastErr = null;
+    for (let attempt = 0; attempt <= retries; attempt++) {
+        try {
+            return await axios.get(url, config);
+        } catch (err) {
+            if (axios.isCancel(err)) throw err;
+            lastErr = err;
+            if (attempt < retries) {
+                if (!IS_PROD) console.log(`[Proxy] ⚠️ Reintentando (${attempt + 1}/${retries}): ${url.substring(0, 60)}...`);
+                // Los espejos /stream/ de StreamWish caen respuestas en ráfagas:
+                // un breve lapso entre reintentos ayuda a esquivar el throttling.
+                if (retryDelayMs > 0) await new Promise(r => setTimeout(r, retryDelayMs));
+            }
+        }
     }
+    throw lastErr;
+}
+
+// Hot-Swap de StreamWish: re-extrae el embed (FORZANDO página fresca para
+// saltarse la caché) y devuelve un fetch nuevo con la URL/cookie/referer nuevos.
+// Se usa cuando un manifest cae (ECONNABORTED/404) o cuando llega un playlist
+// "solo-anuncios" (castigo anti-bot del espejo /stream/).
+async function streamwishHotSwap(swEmbedUrl, curUrl, curCookie, curReferer, effReferer, req, timeout) {
+  const swService = require('../services/streamwish');
+  const swResult = await swService.extract(swEmbedUrl, true);
+  if (!swResult || !swResult.videoUrl) throw new Error('re-extracción sin videoUrl');
+
+  const wasSame = swResult.videoUrl === curUrl;
+  console.log(`[Proxy] ✅ ${wasSame ? 'Re-extracción dio la misma URL' : 'Re-extracción fresca obtenida'}. Reintentando manifest...`);
+
+  curUrl = swResult.videoUrl;
+  if (swResult.cookie)   curCookie = swResult.cookie;
+  if (swResult.referer)  { curReferer = swResult.referer; effReferer = swResult.referer; }
+
+  let newOrigin = '';
+  try { newOrigin = new URL(curUrl).origin; } catch {}
+  const newHeaders = getMediaHeaders(effReferer, newOrigin);
+  if (curCookie) newHeaders['Cookie'] = curCookie;
+  if (req.headers['x-forwarded-for']) newHeaders['X-Forwarded-For'] = req.headers['x-forwarded-for'];
+  if (req.headers['x-real-ip'])       newHeaders['X-Real-IP']       = req.headers['x-real-ip'];
+
+  // Si el espejo es el mismo y sigue throttled, dar 2.5s de respiro
+  if (wasSame) await new Promise(r => setTimeout(r, 2500));
+
+  const upstream = await fetchUpstream(curUrl, newHeaders, timeout, req, 2, 1200);
+  return { upstream, decodedUrl: curUrl, decodedCookie: curCookie, decodedReferer: curReferer, effectiveReferer: effReferer };
 }
 
 async function proxyHandler(req, res, next) {
   try {
-    const { url, referer = '', forceM3u8 = '0', wrapM3u8 = '' } = req.query;
+    const { url, referer = '', cookie = '', forceM3u8 = '0', wrapM3u8 = '', provider = '', embed_url = '' } = req.query;
 
     if (!url) return res.status(400).end();
 
     let decodedUrl       = decodeURIComponent(url);
-    const decodedReferer = referer ? decodeURIComponent(referer) : '';
+    let decodedReferer   = referer ? decodeURIComponent(referer) : '';
+    let decodedCookie    = cookie ? decodeURIComponent(cookie) : '';
     
     let origin = '';
     try { origin = new URL(decodedUrl).origin; } catch {}
@@ -251,11 +292,26 @@ async function proxyHandler(req, res, next) {
     // LOGICA DE REFERER
     let targetOrigin = '';
     try { targetOrigin = new URL(decodedUrl).origin; } catch {}
-    const effectiveReferer = decodedReferer || targetOrigin;
+    let effectiveReferer = decodedReferer || targetOrigin;
 
     const headers = getMediaHeaders(effectiveReferer, targetOrigin);
+    if (decodedCookie) {
+      headers['Cookie'] = decodedCookie;
+    }
     if (req.headers.range) {
       headers['Range'] = req.headers.range;
+    }
+
+    // StreamWish: los espejos /stream/ y los CDNs son sensibles a la IP real
+    // del cliente (rate-limit de "IP dual"): reenviamos la IP desde Vercel.
+    // En VOE estropea la comprobación de IP y causa 403, por eso solo aquí.
+    const isStreamwish =
+      provider === 'streamwish' ||
+      /streamwish|hgcloud|premilkyway|auronamedicalgroup|digitalstorehouse|goldenfieldcreativeworks/.test(decodedUrl) ||
+      /streamwish|hgcloud/.test(decodedReferer);
+    if (isStreamwish) {
+      if (req.headers['x-forwarded-for']) headers['X-Forwarded-For'] = req.headers['x-forwarded-for'];
+      if (req.headers['x-real-ip'])       headers['X-Real-IP']       = req.headers['x-real-ip'];
     }
 
     // ── MEJORA 3: Timeout diferenciado ───────────────────────
@@ -264,9 +320,34 @@ async function proxyHandler(req, res, next) {
     const isSegment = decodedUrl.includes('.ts') || 
                       decodedUrl.includes('.m4s') ||
                       decodedUrl.includes('.mp4');
-    const timeout = isM3u8Request ? 8_000 : (isSegment ? 15_000 : 20_000);
+    const timeout = isM3u8Request ? (isStreamwish ? 20_000 : 8_000) : (isSegment ? 15_000 : 20_000);
 
-    let upstream = await fetchUpstream(decodedUrl, headers, timeout, req);
+    let upstream;
+    try {
+      // StreamWish: más reintentos (3) y con un lapso entre ellos para esquivar
+      // el throttling por ráfagas del espejo /stream/.
+      upstream = await fetchUpstream(decodedUrl, headers, timeout, req, isStreamwish ? 3 : 1, isStreamwish ? 1200 : 0);
+    } catch (upstreamErr) {
+      // StreamWish: los espejos /stream/ (playnixes/hglamioz/medixiru) responden en
+      // ráfagas agresivas (ECONNABORTED/404 ~50%). Si un manifest cae, re-extraemos
+      // el embed original (FORZANDO página fresca para saltarnos la caché) y
+      // reintentamos con una URL de stream nueva (Hot-Swap), igual que con VOE.
+      const swEmbedUrl = embed_url ? decodeURIComponent(embed_url) : '';
+      if (isStreamwish && isM3u8Request && swEmbedUrl) {
+        console.log(`[Proxy] ⚠️ Fallo de StreamWish en manifest (${upstreamErr.code || upstreamErr.message}). Hot-Swap...`);
+        try {
+          const hs = await streamwishHotSwap(swEmbedUrl, decodedUrl, decodedCookie, decodedReferer, effectiveReferer, req, timeout);
+          decodedUrl = hs.decodedUrl; decodedCookie = hs.decodedCookie;
+          decodedReferer = hs.decodedReferer; effectiveReferer = hs.effectiveReferer;
+          upstream = hs.upstream;
+        } catch (retryErr) {
+          console.error(`[Proxy] ❌ Falló el Hot-Swap de StreamWish:`, retryErr.message);
+          throw retryErr;
+        }
+      } else {
+        throw upstreamErr;
+      }
+    }
 
     // ── RE-EXTRACCIÓN PARA VOE (ERROR 403 IP-BINDING M3U8 y TS) ──
     if (upstream.status === 403) {
@@ -341,23 +422,60 @@ async function proxyHandler(req, res, next) {
       return;
     }
 
-    // Recopilar el cuerpo M3U8 y procesarlo
+    // Recopilar el cuerpo M3U8 y procesarlo (con lazo anti-anuncios de StreamWish)
     res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
     res.setHeader('X-Cache', 'MISS');
-    let body = '';
-    upstream.data.on('data',  chunk => { body += chunk; });
-    upstream.data.on('end',   () => {
-      
+    const swEmbedUrl = embed_url ? decodeURIComponent(embed_url) : '';
+
+    let processed = null;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const body = await readBody(upstream.data);
+
       // ── VALIDACIÓN ESTRICTA M3U8 (Evitar parsear HTML de error) ──
       if (!body.includes('#EXTM3U')) {
-          console.error(`[Proxy] ❌ Contenido M3U8 Inválido (Posible 403 HTML oculto).`);
-          return res.end(); // Retorna vacío en lugar de enviar basura
+        console.error(`[Proxy] ❌ Contenido M3U8 Inválido (Posible 403 HTML oculto).`);
+        if (isStreamwish && swEmbedUrl && attempt === 0) {
+          console.log(`[Proxy] ⚠️ Manifest StreamWish inválido. Hot-Swap...`);
+          try {
+            const hs = await streamwishHotSwap(swEmbedUrl, decodedUrl, decodedCookie, decodedReferer, effectiveReferer, req, timeout);
+            decodedUrl = hs.decodedUrl; decodedCookie = hs.decodedCookie;
+            decodedReferer = hs.decodedReferer; effectiveReferer = hs.effectiveReferer;
+            upstream = hs.upstream;
+            continue;
+          } catch (retryErr) {
+            console.error(`[Proxy] ❌ Falló Hot-Swap por manifest inválido:`, retryErr.message);
+          }
+        }
+        return res.end(); // Retorna vacío en lugar de enviar basura
       }
 
-      let processed = rewriteM3u8(body, decodedUrl, '/proxy', decodedReferer);
+      // StreamWish anti-bot: puede responder un playlist válido pero de SOLO
+      // anuncios (tiktokcdn) cuando castiga la IP. Lo detectamos y hot-swaperamos.
+      if (body.includes('#EXTINF') && isStreamwish && swEmbedUrl && attempt === 0) {
+        const mediaLines = body.split('\n').filter(l => l && !l.startsWith('#'));
+        const realLines  = mediaLines.filter(l => !AD_BLOCKLIST.some(d => l.includes(d)));
+        if (mediaLines.length > 0 && realLines.length === 0) {
+          console.log(`[Proxy] ⚠️ Manifest StreamWish solo-anuncios (${mediaLines.length} líneas). Hot-Swap...`);
+          try {
+            const hs = await streamwishHotSwap(swEmbedUrl, decodedUrl, decodedCookie, decodedReferer, effectiveReferer, req, timeout);
+            decodedUrl = hs.decodedUrl; decodedCookie = hs.decodedCookie;
+            decodedReferer = hs.decodedReferer; effectiveReferer = hs.effectiveReferer;
+            upstream = hs.upstream;
+            continue;
+          } catch (retryErr) {
+            console.error(`[Proxy] ❌ Falló Hot-Swap por playlist de anuncios:`, retryErr.message);
+          }
+        }
+      }
 
-      // wrapM3u8: Si el m3u8 es una playlist de un solo nivel (sin #EXT-X-STREAM-INF),
-      // lo envolvemos en un master sintético para que el reproductor muestre la calidad correcta.
+      processed = rewriteM3u8(body, decodedUrl, '/proxy', decodedReferer, decodedCookie, swEmbedUrl);
+      break;
+    }
+
+    if (processed === null) return res.end();
+    // wrapM3u8: Si el m3u8 es una playlist de un solo nivel (sin #EXT-X-STREAM-INF),
+    // lo envolvemos en un master sintético para que el reproductor muestre la calidad correcta.
+    {
       if (wrapM3u8 && processed.includes('#EXTINF') && !processed.includes('#EXT-X-STREAM-INF')) {
         const levelName = decodeURIComponent(wrapM3u8);  // ej. "720p"
         const resMap    = { '1080p': '1920x1080', '720p': '1280x720', '480p': '854x480', '360p': '640x360' };
@@ -365,7 +483,7 @@ async function proxyHandler(req, res, next) {
         const bwMap     = { '1080p': '4000000', '720p': '2000000', '480p': '1000000', '360p': '500000' };
         const bw        = bwMap[levelName] || '2000000';
         // La playlist real ya está reescrita con rutas de proxy; la apuntamos directamente
-        const innerUrl  = `/proxy?url=${encodeURIComponent(decodedUrl)}&referer=${encodeURIComponent(decodedReferer)}&forceM3u8=1`;
+        const innerUrl  = `/proxy?url=${encodeURIComponent(decodedUrl)}&referer=${encodeURIComponent(decodedReferer)}${decodedCookie ? `&cookie=${encodeURIComponent(decodedCookie)}` : ''}${swEmbedUrl ? `&embed_url=${encodeURIComponent(swEmbedUrl)}` : ''}&forceM3u8=1`;
         processed = [
           '#EXTM3U',
           '#EXT-X-VERSION:3',
@@ -376,13 +494,23 @@ async function proxyHandler(req, res, next) {
       } else if (processed.includes('#EXT-X-STREAM-INF') || processed.includes('#EXT-X-MEDIA')) {
         setCache(decodedUrl, processed);
       }
+    }
 
-      sendCompressed(req, res, processed);
-    });
+    sendCompressed(req, res, processed);
 
   } catch (err) {
     if (!res.headersSent) res.status(404).end();
   }
+}
+
+/** Lee un stream de axios completo y devuelve su contenido como string. */
+function readBody(stream) {
+  return new Promise((resolve, reject) => {
+    let data = '';
+    stream.on('data', chunk => { data += chunk; });
+    stream.on('end', () => resolve(data));
+    stream.on('error', reject);
+  });
 }
 
 // ── MEJORA 1: Envío con compresión gzip si el cliente la soporta ──

@@ -95,14 +95,22 @@ async function playHandler(req, res, next) {
     // Construye la URL de proxy (relativa para evitar problemas de HTTPS/Mixed Content)
     const encodedVideoUrl = encodeURIComponent(result.videoUrl);
     const encodedReferer  = encodeURIComponent(result.referer || '');
+    const encodedCookie   = encodeURIComponent(result.cookie || '');
     const isHlsTxt        = /\.txt(\?|$)/i.test(result.videoUrl);
     // wrapLevel: cuando el servicio indica que el m3u8 es single-level (sin #EXT-X-STREAM-INF)
     // el proxy generará un master sintético con la calidad indicada (ej. "720p")
     const wrapParam       = result.wrapLevel ? `&wrapM3u8=${encodeURIComponent(result.wrapLevel)}` : '';
+    // streamwish/hgcloud: el espejo /stream/ es intermitente. El proxy necesita
+    // saber el proveedor (para el reenvío XFF) y el embed original (para poder
+    // re-extraer en caliente si el manifest cae con ECONNABORTED/404).
+    const swParams =
+      (provider === 'streamwish' || provider === 'hgcloud')
+        ? `&provider=streamwish&embed_url=${encodeURIComponent(decodedUrl)}`
+        : '';
     
-    let proxyUrl = `/proxy?url=${encodedVideoUrl}&referer=${encodedReferer}${isHlsTxt ? '&forceM3u8=1' : ''}${wrapParam}`;
+    let proxyUrl = `/proxy?url=${encodedVideoUrl}&referer=${encodedReferer}${encodedCookie ? `&cookie=${encodedCookie}` : ''}${isHlsTxt ? '&forceM3u8=1' : ''}${wrapParam}${swParams}`;
 
-    // ÓPTIMO DE BANDA (StreamWish / VidHide / Filemoon): el proveedor ya
+    // ÓPTIMO DE BANDA (VidHide / Filemoon): el proveedor ya
     // entrega un HLS/m3u8 completo y reproducible, así que el reproductor puede
     // consumir ese HLS DIRECTAMENTE desde el CDN del proveedor (sus segmentos NO
     // pasan por Vercel, Data Transfer ≈ 0). El proxy solo se usa como respaldo si
@@ -113,13 +121,18 @@ async function playHandler(req, res, next) {
     // a la IP del servidor → 403/CORS en directo. Todo el tráfico VOE pasa por
     // /proxy (con hot-swap en caso de 403).
     //
+    // StreamWish/HGCloud excluido (25/09/2026): sus CDNs (premilkyway.com,
+    // auronamedicalgroup.*, digitalstorehouse.*, ...) usan TLS-fingerprinting
+    // que bloquea peticiones del servidor y ya no envían ACAO al navegador. Y el
+    // espejo /stream/ tampoco envía ACAO → TODO el tráfico pasa por /proxy con
+    // las cookies (file_id/aff/ref_url) y el referer del espejo.
+    //
     // VidHide: m3u8 absoluto de dramiyos-cdn.com (ACAO: * y sin exigencia de
     // referer) → directo OK.
     // Filemoon: m3u8 de *.r66nv9ed.com (ACAO: * en master/variante/segmento,
     // sin cifrado EXT-X-KEY) → directo OK.
     const directPlay =
-      (provider === 'streamwish' || provider === 'hgcloud' ||
-       provider === 'vidhide'    || provider === 'filemoon') &&
+      (provider === 'vidhide'    || provider === 'filemoon') &&
       result.type === 'm3u8';
 
     // ── FIN DE LÓGICA INLINE BYPASS (REMOVIDO POR CORS/RELATIVE_PATH ISSUES) ──
