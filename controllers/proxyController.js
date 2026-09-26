@@ -12,7 +12,7 @@ const axios               = require('axios');
 const http                = require('http');
 const https               = require('https');
 const zlib                = require('zlib');
-const { getMediaHeaders } = require('../utils/browserHeaders');
+const { getMediaHeaders, getBrowserHeaders } = require('../utils/browserHeaders');
 
 // CONFIGURACIÓN DE AHORRO DE BANDA
 // Si es 'false', los segmentos (.ts) se cargarán directo del CDN original.
@@ -241,6 +241,7 @@ async function streamwishHotSwap(swEmbedUrl, curUrl, curCookie, curReferer, effR
 
   let newOrigin = '';
   try { newOrigin = new URL(curUrl).origin; } catch {}
+  if (/premilkyway/i.test(curUrl)) newOrigin = '';
   const newHeaders = getMediaHeaders(effReferer, newOrigin);
   if (curCookie) newHeaders['Cookie'] = curCookie;
   if (req.headers['x-forwarded-for']) newHeaders['X-Forwarded-For'] = req.headers['x-forwarded-for'];
@@ -250,6 +251,20 @@ async function streamwishHotSwap(swEmbedUrl, curUrl, curCookie, curReferer, effR
   if (wasSame) await new Promise(r => setTimeout(r, 2500));
 
   const upstream = await fetchUpstream(curUrl, newHeaders, timeout, req, 2, 1200);
+  // Último intento: si premilkyway aún responde 403 (o devuelve algo que no es
+  // un manifest), repetir con headers de navegador en modo documento (sin
+  // Origin): exactamente el perfil del probe base que sí pasa su WAF.
+  if (upstream.status === 403 || !String(upstream.data || '').includes('#EXTM3U')) {
+    console.log(`[Proxy] 🔁 Hot-Swap: reintento con headers de navegador (documento) tras ${upstream.status}`);
+    const docHeaders = getBrowserHeaders(effReferer, '');
+    if (curCookie) docHeaders['Cookie'] = curCookie;
+    const u2 = await fetchUpstream(curUrl, docHeaders, timeout, req, 1, 0)
+      .catch(err => ({ status: 0, data: '', statusText: err.message }));
+    if (u2.status >= 200 && u2.status < 300 && String(u2.data || '').includes('#EXTM3U')) {
+      return { upstream: u2, decodedUrl: curUrl, decodedCookie: curCookie, decodedReferer: curReferer, effectiveReferer: effReferer };
+    }
+    return { upstream, decodedUrl: curUrl, decodedCookie: curCookie, decodedReferer: curReferer, effectiveReferer: effReferer };
+  }
   return { upstream, decodedUrl: curUrl, decodedCookie: curCookie, decodedReferer: curReferer, effectiveReferer: effReferer };
 }
 
@@ -290,10 +305,13 @@ async function proxyHandler(req, res, next) {
     }
 
     // LOGICA DE REFERER
-    let targetOrigin = '';
+let targetOrigin = '';
     try { targetOrigin = new URL(decodedUrl).origin; } catch {}
     let effectiveReferer = decodedReferer || targetOrigin;
-
+    // premilkyway (CDN hls2/hls3): un navegador jamás enviaría Origin con su
+    // propio dominio; IP de datacenter + Origin artificial dispara su WAF (403).
+    // Solo el Referer https://streamwish.to es necesario.
+    if (/premilkyway/i.test(decodedUrl)) targetOrigin = '';
     const headers = getMediaHeaders(effectiveReferer, targetOrigin);
     if (decodedCookie) {
       headers['Cookie'] = decodedCookie;
@@ -352,7 +370,21 @@ async function proxyHandler(req, res, next) {
     // ── RE-EXTRACCIÓN PARA VOE (ERROR 403 IP-BINDING M3U8 y TS) ──
     if (upstream.status === 403) {
         const { detectProvider } = require('../utils/urlDetector');
-        if (detectProvider(effectiveReferer) === 'voe' || detectProvider(decodedUrl) === 'voe') {
+        // StreamWish/HGCloud: premilkyway *.hls2 responde 403 a veces (nodos que
+        // rotan y rechazan IPs de datacenter). Hot-swap: força re-extracción
+        // fresca (token/nodo nuevos) y reintenta el manifest antes de rendirse.
+        if (isStreamwish && isM3u8Request && embed_url) {
+            console.log(`[Proxy] ⚠️ Error 403 en manifest StreamWish. Hot-Swap...`);
+            try {
+                const hs = await streamwishHotSwap(decodeURIComponent(embed_url), decodedUrl, decodedCookie, decodedReferer, effectiveReferer, req, timeout);
+                decodedUrl = hs.decodedUrl; decodedCookie = hs.decodedCookie;
+                decodedReferer = hs.decodedReferer; effectiveReferer = hs.effectiveReferer;
+                upstream = hs.upstream;
+            } catch (retryErr) {
+                console.error(`[Proxy] ❌ Falló el Hot-Swap de StreamWish por 403:`, retryErr.message);
+                throw retryErr;
+            }
+        } else if (detectProvider(effectiveReferer) === 'voe' || detectProvider(decodedUrl) === 'voe') {
             console.log(`[Proxy] ⚠️ Error 403 en VOE para ${isM3u8Request ? 'M3U8' : 'Fragmento TS'}. Iniciando re-extracción en caliente (Hot-Swap)...`);
             try {
                 const voeService = require('../services/voe');
