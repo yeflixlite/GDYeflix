@@ -268,6 +268,37 @@ async function streamwishHotSwap(swEmbedUrl, curUrl, curCookie, curReferer, effR
   return { upstream, decodedUrl: curUrl, decodedCookie: curCookie, decodedReferer: curReferer, effectiveReferer: effReferer };
 }
 
+// ── HOT-SWAP DE SEGMENTOS (TS) PARA STREAMWISH ──
+// premilkyway estrangula la IP del servidor progresivamente: los primeros
+// segmentos pasan y luego empiezan los 403/timeouts (~2 min de video).
+// Re-extraemos el embed en fresco y trasplantamos host+tokens nuevos al
+// segmento viejo (el nombre de archivo seg-N es estable entre tokens),
+// igual que el hot-swap de TS de VOE. Así el reproductor se recupera solo.
+async function streamwishSegmentSwap(swEmbedUrl, curSegUrl, curCookie, effReferer, req, timeout) {
+  const swService = require('../services/streamwish');
+  const swResult = await swService.extract(swEmbedUrl, true);
+  if (!swResult || !swResult.videoUrl) throw new Error('re-extracción sin videoUrl');
+
+  const oldSeg = new URL(curSegUrl);
+  const newMaster = new URL(swResult.videoUrl);
+  // El host y los tokens rotan por extracción: trasplantar ambos al segmento
+  oldSeg.host = newMaster.host;
+  oldSeg.search = newMaster.search;
+  const newSegUrl = oldSeg.toString();
+
+  console.log(`[Proxy] ✅ Hot-Swap TS StreamWish. Reintentando fragmento con token/nodo frescos...`);
+  let newOrigin = '';
+  if (!/premilkyway/i.test(newSegUrl)) { try { newOrigin = new URL(newSegUrl).origin; } catch {} }
+  const newHeaders = getMediaHeaders(swResult.referer || effReferer, newOrigin);
+  if (swResult.cookie) newHeaders['Cookie'] = swResult.cookie;
+  else if (curCookie)  newHeaders['Cookie'] = curCookie;
+  if (req.headers['x-forwarded-for']) newHeaders['X-Forwarded-For'] = req.headers['x-forwarded-for'];
+  if (req.headers['x-real-ip'])       newHeaders['X-Real-IP']       = req.headers['x-real-ip'];
+
+  const upstream = await fetchUpstream(newSegUrl, newHeaders, timeout, req, 2, 1200);
+  return { upstream, decodedUrl: newSegUrl };
+}
+
 async function proxyHandler(req, res, next) {
   try {
     const { url, referer = '', cookie = '', forceM3u8 = '0', wrapM3u8 = '', provider = '', embed_url = '' } = req.query;
@@ -342,9 +373,11 @@ let targetOrigin = '';
 
     let upstream;
     try {
-      // StreamWish: más reintentos (3) y con un lapso entre ellos para esquivar
-      // el throttling por ráfagas del espejo /stream/.
-      upstream = await fetchUpstream(decodedUrl, headers, timeout, req, isStreamwish ? 3 : 1, isStreamwish ? 1200 : 0);
+      // StreamWish: más reintentos y con un lapso entre ellos para esquivar
+      // el throttling por ráfagas. Los TS fallan rápido (2 intentos): si el
+      // nodo estrangula, el hot-swap con token fresco recupera antes.
+      const swRetries = isStreamwish ? (isSegment ? 2 : 3) : 1;
+      upstream = await fetchUpstream(decodedUrl, headers, timeout, req, swRetries, isStreamwish ? 1200 : 0);
     } catch (upstreamErr) {
       // StreamWish: los espejos /stream/ (playnixes/hglamioz/medixiru) responden en
       // ráfagas agresivas (ECONNABORTED/404 ~50%). Si un manifest cae, re-extraemos
@@ -360,6 +393,18 @@ let targetOrigin = '';
           upstream = hs.upstream;
         } catch (retryErr) {
           console.error(`[Proxy] ❌ Falló el Hot-Swap de StreamWish:`, retryErr.message);
+          throw retryErr;
+        }
+      } else if (isStreamwish && isSegment && swEmbedUrl) {
+        // El CDN estrangula la IP a mitad del video (timeouts en TS): trasplantar
+        // host+tokens frescos al segmento y reintentar.
+        console.log(`[Proxy] ⚠️ Fallo de StreamWish en segmento (${upstreamErr.code || upstreamErr.message}). Hot-Swap TS...`);
+        try {
+          const ss = await streamwishSegmentSwap(swEmbedUrl, decodedUrl, decodedCookie, effectiveReferer, req, timeout);
+          decodedUrl = ss.decodedUrl;
+          upstream = ss.upstream;
+        } catch (retryErr) {
+          console.error(`[Proxy] ❌ Falló el Hot-Swap TS de StreamWish:`, retryErr.message);
           throw retryErr;
         }
       } else {
@@ -382,6 +427,18 @@ let targetOrigin = '';
                 upstream = hs.upstream;
             } catch (retryErr) {
                 console.error(`[Proxy] ❌ Falló el Hot-Swap de StreamWish por 403:`, retryErr.message);
+                throw retryErr;
+            }
+        } else if (isStreamwish && isSegment && embed_url) {
+            // 403 en segmento a mitad del video (throttle del CDN): trasplantar
+            // host+tokens frescos al segmento y reintentar.
+            console.log(`[Proxy] ⚠️ Error 403 en segmento StreamWish. Hot-Swap TS...`);
+            try {
+                const ss = await streamwishSegmentSwap(decodeURIComponent(embed_url), decodedUrl, decodedCookie, effectiveReferer, req, timeout);
+                decodedUrl = ss.decodedUrl;
+                upstream = ss.upstream;
+            } catch (retryErr) {
+                console.error(`[Proxy] ❌ Falló el Hot-Swap TS de StreamWish por 403:`, retryErr.message);
                 throw retryErr;
             }
         } else if (detectProvider(effectiveReferer) === 'voe' || detectProvider(decodedUrl) === 'voe') {
